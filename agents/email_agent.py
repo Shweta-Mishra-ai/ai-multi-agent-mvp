@@ -1,18 +1,9 @@
-from llm_client import client
+from agents.base_agent import BaseAgent
 
-class EmailAgent:
-    def run(self, user_input):
-        prompt = f"""
-        You are a professional email writing assistant.
-        Write a polite, clear, and professional email for the following request:
-        {user_input}
-        """
 
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-
-        return response.choices[0].message.content
+class EmailAgent(BaseAgent):
+    name = "email"
+    system_prompt = """You are a professional email writing assistant.
+Write a polite, clear, and professional email for the user's request.
+If context from previous steps is provided (e.g. research findings or a plan),
+incorporate it into the email body."""

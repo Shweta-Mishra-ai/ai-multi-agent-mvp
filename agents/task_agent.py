@@ -1,20 +1,9 @@
-from llm_client import client
+from agents.base_agent import BaseAgent
 
-class TaskAgent:
-    def run(self, user_input):
-        prompt = f"""
-        You are a task planning AI.
-        Break the following goal into small, clear, actionable steps.
-        Keep it simple and structured.
 
-        Goal: {user_input}
-        """
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-
-        return response.choices[0].message.content
+class TaskAgent(BaseAgent):
+    name = "task"
+    system_prompt = """You are a task planning AI.
+Break the user's goal into small, clear, actionable steps.
+Keep it simple and structured.
+If context from previous steps is provided, build your plan on top of it."""

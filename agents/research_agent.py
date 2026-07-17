@@ -1,18 +1,8 @@
-from llm_client import client
+from agents.base_agent import BaseAgent
 
-class ResearchAgent:
-    def run(self, user_input):
-        prompt = f"""
-        You are a research assistant.
-        Give a concise summary with key bullet points about:
-        {user_input}
-        """
 
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-
-        return response.choices[0].message.content
+class ResearchAgent(BaseAgent):
+    name = "research"
+    system_prompt = """You are a research assistant.
+Give a concise, well-organized summary with key bullet points about the topic.
+If context from previous steps is provided, use it to focus your research."""
