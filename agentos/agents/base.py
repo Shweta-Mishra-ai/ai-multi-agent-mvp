@@ -1,34 +1,27 @@
 import json
 
-from llm_client import chat
+from agentos import tools as toolbox
+from agentos.llm import chat
 
 
-class BaseAgent:
-    """Shared agent loop: call the LLM, execute any requested tools,
-    feed results back, and repeat until the agent produces a final answer.
+class Agent:
+    """Generic tool-loop agent: calls the LLM, executes requested tools,
+    feeds results back, and repeats until it produces a final answer.
+    Behavior comes entirely from the AgentSpec (prompt + tool list)."""
 
-    Subclasses set `name`, `system_prompt`, and optionally register tools
-    via `tools` (name -> python function) and `tool_schemas` (OpenAI
-    function-calling schemas). Agents without tools behave like a single
-    LLM call, but gain tool support without any further changes.
-    """
+    max_turns = 8
 
-    name = "base"
-    system_prompt = "You are a helpful assistant."
-    tools = {}
-    tool_schemas = []
-    max_turns = 5
+    def __init__(self, spec):
+        self.spec = spec
+        self.tool_schemas, self.tool_fns = toolbox.resolve(spec.tools)
 
     def run(self, task, context=""):
         user_content = task
         if context:
-            user_content = (
-                f"{task}\n\n"
-                f"Context from previous steps:\n{context}"
-            )
+            user_content = f"{task}\n\nContext from previous steps:\n{context}"
 
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": self.spec.system_prompt},
             {"role": "user", "content": user_content},
         ]
 
@@ -50,7 +43,7 @@ class BaseAgent:
         return "Agent stopped: reached the maximum number of tool turns."
 
     def _execute_tool(self, call):
-        fn = self.tools.get(call.function.name)
+        fn = self.tool_fns.get(call.function.name)
         if fn is None:
             return f"Unknown tool: {call.function.name}"
         try:

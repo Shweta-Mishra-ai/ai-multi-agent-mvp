@@ -1,42 +1,47 @@
 import streamlit as st
-from parent_agent import ParentAgent
 
-st.set_page_config(
-    page_title="AI Multi-Agent System",
-    layout="centered"
-)
+from agentos.kernel import Kernel
+from agentos.registry import all_specs
 
-st.title("🧠 AI Multi-Agent Task Manager")
+st.set_page_config(page_title="AgentOS", layout="centered")
+
+st.title("🧠 AgentOS")
+st.caption("Multi-agent orchestration: plan → agents → tools → verify. "
+           "Also available from the CLI: `python cli.py run \"...\"`")
+
+with st.sidebar:
+    st.subheader("Registered agents")
+    for spec in all_specs():
+        st.markdown(f"**{spec.name}** — {spec.description}")
+        if spec.tools:
+            st.caption("tools: " + ", ".join(spec.tools))
+
+if "session_id" not in st.session_state:
+    st.session_state.session_id = None
 
 user_input = st.text_area(
     "What do you want to do?",
-    placeholder="e.g. Research the top 3 CRM tools and write an email "
-                "to my manager comparing them"
+    placeholder="e.g. Research the top 3 CRM tools, write a comparison report, "
+                "and draft an email to my manager"
 )
-energy = st.selectbox(
-    "Your current energy level",
-    ["Low", "Medium", "High"]
-)
+energy = st.selectbox("Your current energy level", ["Low", "Medium", "High"])
 
-if st.button("Run AI"):
+if st.button("Run AgentOS"):
     if user_input.strip() == "":
         st.warning("Please enter a task.")
     else:
-        agent = ParentAgent()
+        kernel = Kernel()
         status = None
         final_output = None
 
-        with st.spinner("Planning..."):
-            events = agent.handle(user_input, energy)
-            first_event = next(events)
-
-        if first_event["type"] == "plan":
-            with st.expander("📋 Plan", expanded=True):
-                for i, step in enumerate(first_event["steps"], 1):
-                    st.markdown(f"**{i}. {step['agent']}** — {step['instruction']}")
-
-        for event in events:
-            if event["type"] == "step_start":
+        for event in kernel.run(user_input, energy,
+                                session_id=st.session_state.session_id):
+            if event["type"] == "plan":
+                st.session_state.session_id = event["session_id"]
+                with st.expander("📋 Plan", expanded=True):
+                    for i, step in enumerate(event["steps"], 1):
+                        st.markdown(f"**{i}. {step['agent']}** — {step['instruction']}")
+            elif event["type"] == "step_start":
                 status = st.status(
                     f"Step {event['index'] + 1}: {event['agent']} agent working...",
                     state="running",
@@ -50,10 +55,14 @@ if st.button("Run AI"):
                     with status:
                         st.write(event["output"])
                     status = None
+            elif event["type"] == "verify":
+                if event["satisfied"]:
+                    st.caption("✔ Verifier: output satisfies the request")
                 else:
-                    st.error(event["output"])
+                    st.warning(f"Verifier requested a revision: {event['feedback']}")
+            elif event["type"] == "done":
                 final_output = event["output"]
 
         if final_output is not None:
-            st.success("AI Output")
+            st.success("Result")
             st.write(final_output)
