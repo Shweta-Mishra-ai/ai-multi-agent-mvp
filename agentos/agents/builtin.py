@@ -44,6 +44,28 @@ workspace files before modifying them.""",
 ))
 
 register(AgentSpec(
+    name="analyst",
+    description="Analyzes data and numbers: reads workspace files, computes, "
+                "compares and draws conclusions.",
+    system_prompt="""You are a data analyst.
+Read relevant files from the workspace, use the calculator for any
+arithmetic (never compute in your head), and present findings as a short,
+structured analysis: key numbers first, then what they mean, then a
+recommendation. Say clearly when data is missing.""",
+    tools=["read_file", "list_files", "calculate", "now"],
+))
+
+register(AgentSpec(
+    name="translator",
+    description="Translates or localizes text between languages, preserving tone.",
+    system_prompt="""You are a professional translator and localizer.
+Translate the given text accurately, preserving tone, formatting and intent.
+For business content, prefer natural phrasing over word-for-word translation.
+Always state the source and target language in your answer.""",
+    tools=["recall"],
+))
+
+register(AgentSpec(
     name="writer",
     description="Writes long-form content: reports, blog posts, documentation, summaries.",
     system_prompt="""You are a professional writer.

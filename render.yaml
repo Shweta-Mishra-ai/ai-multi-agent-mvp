@@ -1,0 +1,26 @@
+# Render blueprint: deploy the AgentOS HTTP API with one click
+# (Render dashboard -> New -> Blueprint -> point at this repo).
+#
+# Required secret (set in the Render dashboard when prompted):
+#   OPENAI_API_KEY
+# Optional secrets:
+#   TAVILY_API_KEY (better web search), SMTP_* (real email sending)
+#
+# NOTE: on the free plan storage is ephemeral — memory (SQLite) resets on
+# each deploy. Upgrade the plan and attach a disk at /data for persistence.
+
+services:
+  - type: web
+    name: agentos-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false          # prompted securely in the dashboard, never in git
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: AGENTOS_MODEL
+        value: gpt-4o-mini
+      - key: AGENTOS_RATE_LIMIT_PER_MIN
+        value: "10"

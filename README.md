@@ -16,8 +16,10 @@ controllable from the **CLI** or a **web UI**, both running on the same core.
                  │ task       │ │ web_search│ │ sessions  │
                  │ research   │ │ fetch_url │ │ history   │
                  │ email      │ │ send_email│ │ key-value │
-                 │ code       │ │ files     │ │ (SQLite)  │
-                 │ writer     │ │ calc, now │ │           │
+                 │ code       │ │ files     │ │ metrics   │
+                 │ writer     │ │ calc, now │ │ (SQLite)  │
+                 │ analyst    │ │ memory    │ │           │
+                 │ translator │ │           │ │           │
                  └────────────┘ └───────────┘ └───────────┘
 ```
 
@@ -103,6 +105,24 @@ curl -N -X POST localhost:8000/run \
 The API streams the exact same event protocol as the CLI and web UI, so any
 product can embed AgentOS.
 
+### Deploying to Render (one click)
+
+Push this repo, then in Render: **New → Blueprint → select the repo** —
+`render.yaml` configures the service. You'll be prompted for secrets.
+
+### 🔑 Which keys go where
+
+| Where | Key | Required? | Purpose |
+|---|---|---|---|
+| **Render** (dashboard → Environment) | `OPENAI_API_KEY` | ✅ yes | the only key AgentOS needs to run |
+| Render | `TAVILY_API_KEY` | optional | stronger web search (free tier at tavily.com) |
+| Render | `SMTP_HOST/PORT/USER/PASSWORD/FROM` | optional | real email sending (else safe draft-only mode) |
+| **GitHub Actions** | — | ❌ none | CI runs the test suite with a **mocked** LLM (`OPENAI_API_KEY: test` is a dummy value already in the workflow) — no real key, no cost, nothing to configure |
+
+Add a GitHub secret (repo **Settings → Secrets and variables → Actions**)
+only if you later add live-LLM eval jobs to CI. Never commit keys to git —
+`.env` is gitignored and `render.yaml` marks secrets `sync: false`.
+
 ---
 
 ## ➕ Adding a new agent (one registration call)
@@ -110,10 +130,10 @@ product can embed AgentOS.
 ```python
 # agentos/agents/builtin.py
 register(AgentSpec(
-    name="translator",
-    description="Translates text between languages.",
-    system_prompt="You are a professional translator...",
-    tools=["now"],            # any tools from the registry
+    name="social",
+    description="Writes social media posts tuned per platform.",
+    system_prompt="You are a social media expert...",
+    tools=["web_search", "now"],   # any tools from the registry
 ))
 ```
 
