@@ -1,0 +1,12 @@
+{"request": "write a professional email to my manager asking for two days of leave", "expect_agents": ["email"]}
+{"request": "research the latest AI agent frameworks and their differences", "expect_agents": ["research"]}
+{"request": "plan my week: gym, project deadline friday, groceries", "expect_agents": ["task"]}
+{"request": "research the top 3 CRM tools and email a comparison to my manager", "expect_agents": ["research", "email"]}
+{"request": "translate this paragraph to French: The quarterly results exceeded expectations.", "expect_agents": ["translator"]}
+{"request": "write a python script that renames all jpg files in a folder by date", "expect_agents": ["code"]}
+{"request": "analyze the sales numbers in report.csv and tell me the trend", "expect_agents": ["analyst"]}
+{"request": "write a blog post about the benefits of remote work", "expect_agents": ["writer"]}
+{"request": "research electric scooters under 1 lakh and write a comparison report", "expect_agents": ["research", "writer"]}
+{"request": "break down my goal of launching a food startup into actionable steps", "expect_agents": ["task"]}
+{"request": "summarize the latest news about SpaceX launches", "expect_agents": ["research"]}
+{"request": "draft an email to invite the team to friday's demo, and research good demo formats first", "expect_agents": ["research", "email"]}

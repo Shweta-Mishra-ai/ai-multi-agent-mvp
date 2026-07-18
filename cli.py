@@ -23,6 +23,7 @@ console = Console()
 
 def _render_events(events):
     final = None
+    approval_needed = False
     for event in events:
         kind = event["type"]
         if kind == "plan":
@@ -55,6 +56,16 @@ def _render_events(events):
                     f"[yellow]✎ verifier requested a revision:[/yellow] "
                     f"{event['feedback']}"
                 )
+        elif kind == "approval_required":
+            approval_needed = True
+            lines = "\n".join(
+                f"• {a['tool']}({', '.join(f'{k}={v!r}' for k, v in a['args'].items())})"
+                for a in event["actions"]
+            )
+            console.print(Panel(
+                f"These real-world actions were prepared but NOT executed:\n\n{lines}",
+                title="⚠ approval required", border_style="yellow",
+            ))
         elif kind == "error":
             console.print(Panel(str(event["message"]), title="error",
                                 border_style="red"))
@@ -66,18 +77,28 @@ def _render_events(events):
             )
         elif kind == "done":
             final = event["output"]
-    return final
+    return {"final": final, "approval_needed": approval_needed}
 
 
 @app.command()
 def run(
     request: str = typer.Argument(..., help="What you want AgentOS to do"),
     energy: str = typer.Option("Medium", help="Low / Medium / High"),
+    approve: bool = typer.Option(
+        False, "--approve",
+        help="Execute real-world actions (e.g. actually send email)"),
 ):
     """Run one request through the kernel and print the result."""
     from agentos.kernel import Kernel
 
-    _render_events(Kernel().run(request, energy))
+    outcome = _render_events(Kernel().run(request, energy, approve=approve))
+    if outcome["approval_needed"]:
+        if sys.stdin.isatty() and typer.confirm(
+                "Approve these actions and run again to execute them?"):
+            _render_events(Kernel().run(request, energy, approve=True))
+        else:
+            console.print("[yellow]Re-run with --approve to execute "
+                          "the pending actions.[/yellow]")
 
 
 @app.command()
@@ -96,17 +117,28 @@ def chat(energy: str = typer.Option("Medium", help="Low / Medium / High")):
         if not user_input or user_input.lower() in {"exit", "quit"}:
             break
 
-        events = kernel.run(user_input, energy, session_id=session_id)
-        for event in events:
+        approval_needed = False
+        for event in kernel.run(user_input, energy, session_id=session_id):
             if event["type"] == "plan":
                 session_id = event["session_id"]
                 agents = " → ".join(s["agent"] for s in event["steps"])
                 console.print(f"[dim]plan: {agents}[/dim]")
             elif event["type"] == "step_start":
                 console.print(f"[dim]  {event['agent']} working...[/dim]")
+            elif event["type"] == "approval_required":
+                approval_needed = True
+            elif event["type"] == "error":
+                console.print(Panel(str(event["message"]), border_style="red"))
             elif event["type"] == "done":
                 console.print(Panel(Markdown(str(event["output"])),
                                     border_style="green"))
+        if approval_needed and typer.confirm(
+                "⚠ Real-world actions await approval. Approve and execute?"):
+            for event in kernel.run(user_input, energy,
+                                    session_id=session_id, approve=True):
+                if event["type"] == "done":
+                    console.print(Panel(Markdown(str(event["output"])),
+                                        border_style="green"))
     console.print("[dim]bye[/dim]")
 
 

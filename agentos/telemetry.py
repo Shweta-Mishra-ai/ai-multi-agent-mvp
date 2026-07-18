@@ -17,7 +17,17 @@ class RunMetrics:
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self.tool_calls = 0
+        self.approved = False       # user granted real-world action approval
+        self._pending = []          # actions blocked awaiting approval
         self._lock = threading.Lock()
+
+    def record_pending(self, action):
+        with self._lock:
+            self._pending.append(action)
+
+    def pending_actions(self):
+        with self._lock:
+            return list(self._pending)
 
     def record_llm(self, usage):
         with self._lock:
@@ -60,3 +70,14 @@ def record_tool():
     metrics = _current.get()
     if metrics:
         metrics.record_tool()
+
+
+def approvals_granted():
+    metrics = _current.get()
+    return bool(metrics and metrics.approved)
+
+
+def record_pending(action):
+    metrics = _current.get()
+    if metrics:
+        metrics.record_pending(action)

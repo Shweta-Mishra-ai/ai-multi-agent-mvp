@@ -1,0 +1,22 @@
+# Live planner evals — runs the REAL LLM, so it needs the OPENAI_API_KEY
+# repository secret (Settings -> Secrets and variables -> Actions) and is
+# triggered manually (Actions tab -> Evals -> Run workflow) to control cost.
+
+name: Evals
+
+on:
+  workflow_dispatch:
+
+jobs:
+  planner-routing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python evals/run_evals.py
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

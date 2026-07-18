@@ -63,6 +63,14 @@ controllable from the **CLI** or a **web UI**, both running on the same core.
 - **Observability** — structured logging, and per-run metrics (duration,
   LLM calls, tool calls, tokens, estimated cost) persisted and aggregated
   via `python cli.py stats`
+- **Human-in-the-loop approval gates** — irreversible actions (like actually
+  sending an email) are never executed silently: the agent prepares a full
+  preview, the run emits an `approval_required` event, and the action only
+  executes when the user approves (CLI `--approve` / confirm prompt, web UI
+  checkbox, API `"approve": true`)
+- **Live evals** — a golden routing test set (`evals/`) measures planner
+  accuracy against the real LLM; run locally or via the manual `Evals`
+  GitHub Actions workflow
 - **Health & diagnostics** — `/health` endpoint for load balancers and
   `python cli.py doctor` to validate a deployment's configuration
 - **Tested + CI** — pytest suite (kernel orchestration, parallelism, failure
@@ -77,6 +85,7 @@ pip install -r requirements.txt
 cp .env.example .env        # add your OPENAI_API_KEY
 
 python cli.py run "research the top 3 CRM tools and draft a comparison email"
+python cli.py run "email the report to boss@x.com" --approve   # allow real actions
 python cli.py chat          # interactive session with memory
 python cli.py agents        # list registered agents and their tools
 python cli.py history       # recent sessions from persistent memory
@@ -117,11 +126,11 @@ Push this repo, then in Render: **New → Blueprint → select the repo** —
 | **Render** (dashboard → Environment) | `OPENAI_API_KEY` | ✅ yes | the only key AgentOS needs to run |
 | Render | `TAVILY_API_KEY` | optional | stronger web search (free tier at tavily.com) |
 | Render | `SMTP_HOST/PORT/USER/PASSWORD/FROM` | optional | real email sending (else safe draft-only mode) |
-| **GitHub Actions** | — | ❌ none | CI runs the test suite with a **mocked** LLM (`OPENAI_API_KEY: test` is a dummy value already in the workflow) — no real key, no cost, nothing to configure |
+| **GitHub Actions** (CI) | — | ❌ none | CI runs the test suite with a **mocked** LLM (`OPENAI_API_KEY: test` is a dummy value already in the workflow) — no real key, no cost, nothing to configure |
+| GitHub Actions (**Evals**, manual) | `OPENAI_API_KEY` secret | optional | the `Evals` workflow runs the golden routing set against the real LLM; add the secret in repo **Settings → Secrets and variables → Actions**, then trigger it from the Actions tab |
 
-Add a GitHub secret (repo **Settings → Secrets and variables → Actions**)
-only if you later add live-LLM eval jobs to CI. Never commit keys to git —
-`.env` is gitignored and `render.yaml` marks secrets `sync: false`.
+Never commit keys to git — `.env` is gitignored and `render.yaml` marks
+secrets `sync: false`.
 
 ---
 
@@ -181,9 +190,7 @@ says so explicitly.
 
 ## 🔮 Roadmap
 
-- Human-in-the-loop approval gates for irreversible actions
 - API authentication (keys/OAuth) + multi-tenant isolation
 - Scheduled / recurring runs
 - Vector memory for semantic recall
-- Evals: golden test set for planner routing quality
 - Postgres backend option for horizontal scaling
