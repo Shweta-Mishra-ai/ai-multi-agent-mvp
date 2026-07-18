@@ -5,3 +5,5 @@ typer
 rich
 requests
 ddgs
+fastapi
+uvicorn

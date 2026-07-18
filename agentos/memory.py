@@ -29,19 +29,29 @@ CREATE TABLE IF NOT EXISTS kv (
     value TEXT,
     updated_at REAL
 );
+CREATE TABLE IF NOT EXISTS metrics (
+    session_id TEXT,
+    ts REAL,
+    payload TEXT
+);
 """
 
 
 class Memory:
-    """Persistent memory: sessions, conversation history, events, key-value store."""
+    """Persistent memory: sessions, conversation history, events, run metrics
+    and a key-value store. WAL mode + busy timeout make concurrent access
+    (parallel steps, multiple frontends) safe."""
 
     def __init__(self, db_path=None):
         self.db_path = db_path or DB_PATH
         with self._conn() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
 
     def _conn(self):
-        return sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10)
+        conn.execute("PRAGMA busy_timeout=5000")
+        return conn
 
     # --- sessions & conversation ---
 
@@ -86,6 +96,31 @@ class Memory:
                 (limit,),
             ).fetchall()
         return [{"id": i, "created_at": t, "title": title} for i, t, title in rows]
+
+    # --- metrics & rate limiting ---
+
+    def save_metrics(self, session_id, payload):
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO metrics VALUES (?, ?, ?)",
+                (session_id, time.time(), json.dumps(payload, default=str)),
+            )
+
+    def recent_metrics(self, limit=100):
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT payload FROM metrics ORDER BY ts DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [json.loads(r[0]) for r in rows]
+
+    def runs_in_last_minute(self):
+        with self._conn() as conn:
+            (count,) = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE type = 'plan' AND ts > ?",
+                (time.time() - 60,),
+            ).fetchone()
+        return count
 
     # --- long-term key-value memory (used by agents via tools) ---
 

@@ -44,6 +44,30 @@ controllable from the **CLI** or a **web UI**, both running on the same core.
 
 ---
 
+## 🛡️ Production hardening
+
+- **Resilient LLM calls** — timeouts and automatic retries with backoff on
+  rate limits and transient errors (configurable)
+- **Load handling** — independent plan steps run **in parallel** (bounded
+  worker pool); SQLite in WAL mode with busy timeouts for concurrent access
+- **Failure isolation** — a failed step never crashes the run; dependent
+  steps are explicitly skipped and the user gets a clear partial-result report
+- **Budgets** — hard per-run deadline, max steps, max tool turns, and
+  request-size limits protect latency and cost
+- **Security** — input validation, per-deployment rate limiting, SSRF guard
+  (agents cannot fetch internal/private network addresses), tool-argument
+  schema validation, path-traversal-safe workspace, safe (AST-based)
+  calculator, secrets only via environment
+- **Observability** — structured logging, and per-run metrics (duration,
+  LLM calls, tool calls, tokens, estimated cost) persisted and aggregated
+  via `python cli.py stats`
+- **Health & diagnostics** — `/health` endpoint for load balancers and
+  `python cli.py doctor` to validate a deployment's configuration
+- **Tested + CI** — pytest suite (kernel orchestration, parallelism, failure
+  propagation, security guards, API) runs on every push via GitHub Actions
+
+---
+
 ## 💻 CLI usage
 
 ```bash
@@ -54,8 +78,30 @@ python cli.py run "research the top 3 CRM tools and draft a comparison email"
 python cli.py chat          # interactive session with memory
 python cli.py agents        # list registered agents and their tools
 python cli.py history       # recent sessions from persistent memory
+python cli.py stats         # aggregated run metrics (tokens, cost, duration)
+python cli.py doctor        # validate the deployment configuration
+python cli.py serve         # HTTP API (FastAPI) on :8000
 python cli.py ui            # launch the Streamlit web frontend
 ```
+
+---
+
+## 🌐 HTTP API & deployment
+
+```bash
+python cli.py serve                       # dev
+docker compose up --build                 # production container (+ volume for data)
+
+curl localhost:8000/health
+curl localhost:8000/agents
+curl -N -X POST localhost:8000/run \
+     -H 'content-type: application/json' \
+     -d '{"request": "research AI agent frameworks and write a report"}'
+# → streams NDJSON events: plan, step_start, step_result, verify, done, metrics
+```
+
+The API streams the exact same event protocol as the CLI and web UI, so any
+product can embed AgentOS.
 
 ---
 
@@ -80,17 +126,23 @@ New tools are one `@tool` decorator in `agentos/tools/`.
 
 ```
 agentos/
-  kernel.py        # orchestrator: plan → execute → verify, event stream
+  kernel.py        # orchestrator: validate → plan → parallel execute → verify
   planner.py       # LLM planner (structured output, learns agents from registry)
   registry.py      # AgentSpec registration & discovery
-  memory.py        # SQLite: sessions, messages, events, key-value memory
-  llm.py           # provider-agnostic LLM client
+  memory.py        # SQLite (WAL): sessions, messages, events, metrics, kv memory
+  llm.py           # provider-agnostic LLM client (timeouts + retries)
+  config.py        # every limit tunable via environment variables
+  security.py      # input validation, rate limiting, SSRF guard
+  telemetry.py     # per-run metrics: tokens, tool calls, est. cost
+  log.py           # structured logging
   agents/
-    base.py        # generic tool-loop agent
+    base.py        # generic tool-loop agent (arg validation, output caps)
     builtin.py     # task / research / email / code / writer
   tools/           # the "syscalls": web, files, mail, system, memory
-cli.py             # Typer + Rich CLI (run, chat, agents, history, ui)
+cli.py             # Typer + Rich CLI (run, chat, agents, history, stats, doctor, serve, ui)
+api.py             # FastAPI HTTP API (NDJSON event stream)
 app.py             # Streamlit frontend over the same kernel
+tests/             # pytest suite (mocked LLM) — runs in CI on every push
 ```
 
 ---
@@ -109,8 +161,9 @@ says so explicitly.
 
 ## 🔮 Roadmap
 
-- Parallel execution of independent plan steps
 - Human-in-the-loop approval gates for irreversible actions
-- HTTP API frontend (same event stream) + scheduled/recurring runs
+- API authentication (keys/OAuth) + multi-tenant isolation
+- Scheduled / recurring runs
 - Vector memory for semantic recall
 - Evals: golden test set for planner routing quality
+- Postgres backend option for horizontal scaling

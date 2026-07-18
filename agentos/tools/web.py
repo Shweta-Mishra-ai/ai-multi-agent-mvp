@@ -54,6 +54,11 @@ def web_search(query):
     },
 )
 def fetch_url(url):
+    from agentos.security import is_safe_url
+
+    if not is_safe_url(url):
+        return (f"Blocked: {url} is not a safe public http(s) URL "
+                "(internal/private addresses are not allowed).")
     try:
         r = requests.get(url, timeout=20, headers={"User-Agent": "AgentOS/0.2"})
         r.raise_for_status()

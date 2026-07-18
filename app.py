@@ -47,19 +47,32 @@ if st.button("Run AgentOS"):
                     state="running",
                 )
             elif event["type"] == "step_result":
+                step_status = event.get("status", "ok")
                 if status is not None:
+                    icon = {"ok": "✅", "failed": "❌", "skipped": "⏭️"}[step_status]
                     status.update(
-                        label=f"Step {event['index'] + 1}: {event['agent']} agent ✅",
-                        state="complete",
+                        label=f"Step {event['index'] + 1}: {event['agent']} agent {icon}",
+                        state="complete" if step_status == "ok" else "error",
                     )
                     with status:
                         st.write(event["output"])
                     status = None
+                elif step_status != "ok":
+                    st.warning(f"Step {event['index'] + 1} ({event['agent']}): "
+                               f"{event['output']}")
             elif event["type"] == "verify":
                 if event["satisfied"]:
                     st.caption("✔ Verifier: output satisfies the request")
                 else:
                     st.warning(f"Verifier requested a revision: {event['feedback']}")
+            elif event["type"] == "error":
+                st.error(event["message"])
+            elif event["type"] == "metrics":
+                st.caption(
+                    f"⏱ {event['duration_s']}s · {event['llm_calls']} LLM calls · "
+                    f"{event['tool_calls']} tool calls · {event['tokens']} tokens · "
+                    f"~${event['est_cost_usd']}"
+                )
             elif event["type"] == "done":
                 final_output = event["output"]
 

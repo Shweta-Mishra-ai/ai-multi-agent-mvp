@@ -1,5 +1,6 @@
 import json
 
+from agentos import config, telemetry
 from agentos import tools as toolbox
 from agentos.llm import chat
 
@@ -7,13 +8,19 @@ from agentos.llm import chat
 class Agent:
     """Generic tool-loop agent: calls the LLM, executes requested tools,
     feeds results back, and repeats until it produces a final answer.
-    Behavior comes entirely from the AgentSpec (prompt + tool list)."""
+    Behavior comes entirely from the AgentSpec (prompt + tool list).
 
-    max_turns = 8
+    Hardening: tool arguments are validated against the tool's schema
+    (unknown arguments dropped, missing required arguments rejected),
+    tool outputs are size-capped, and the loop is turn-bounded."""
 
     def __init__(self, spec):
         self.spec = spec
+        self.max_turns = config.MAX_TOOL_TURNS
         self.tool_schemas, self.tool_fns = toolbox.resolve(spec.tools)
+        self._schemas_by_name = {
+            s["function"]["name"]: s["function"] for s in self.tool_schemas
+        }
 
     def run(self, task, context=""):
         user_content = task
@@ -46,8 +53,21 @@ class Agent:
         fn = self.tool_fns.get(call.function.name)
         if fn is None:
             return f"Unknown tool: {call.function.name}"
+        telemetry.record_tool()
         try:
             args = json.loads(call.function.arguments or "{}")
-            return str(fn(**args))
+            if not isinstance(args, dict):
+                return "Tool error: arguments must be an object"
+            args = self._validate_args(call.function.name, args)
+            return str(fn(**args))[:config.MAX_TOOL_OUTPUT_CHARS]
         except Exception as e:
             return f"Tool error: {e}"
+
+    def _validate_args(self, tool_name, args):
+        params = self._schemas_by_name.get(tool_name, {}).get("parameters", {})
+        properties = params.get("properties", {})
+        args = {k: v for k, v in args.items() if k in properties}
+        missing = [k for k in params.get("required", []) if k not in args]
+        if missing:
+            raise ValueError(f"missing required argument(s): {', '.join(missing)}")
+        return args

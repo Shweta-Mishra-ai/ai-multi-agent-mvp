@@ -1,14 +1,18 @@
 import os
 
+from agentos import config
 from agentos.tools import tool
 
-WORKSPACE = os.getenv("AGENTOS_WORKSPACE", "workspace")
+
+def _workspace():
+    return os.getenv("AGENTOS_WORKSPACE", "workspace")
 
 
 def _safe_path(name):
-    os.makedirs(WORKSPACE, exist_ok=True)
-    path = os.path.realpath(os.path.join(WORKSPACE, name))
-    root = os.path.realpath(WORKSPACE)
+    workspace = _workspace()
+    os.makedirs(workspace, exist_ok=True)
+    path = os.path.realpath(os.path.join(workspace, name))
+    root = os.path.realpath(workspace)
     if not path.startswith(root + os.sep):
         raise ValueError("path escapes the workspace")
     return path
@@ -16,11 +20,12 @@ def _safe_path(name):
 
 @tool("List all files in the shared workspace.")
 def list_files():
-    os.makedirs(WORKSPACE, exist_ok=True)
+    workspace = _workspace()
+    os.makedirs(workspace, exist_ok=True)
     files = []
-    for dirpath, _, names in os.walk(WORKSPACE):
+    for dirpath, _, names in os.walk(workspace):
         for n in names:
-            files.append(os.path.relpath(os.path.join(dirpath, n), WORKSPACE))
+            files.append(os.path.relpath(os.path.join(dirpath, n), workspace))
     return "\n".join(sorted(files)) or "(workspace is empty)"
 
 
@@ -49,6 +54,9 @@ def read_file(name):
     },
 )
 def write_file(name, content):
+    if len(content.encode("utf-8")) > config.MAX_FILE_BYTES:
+        return (f"Refused: content exceeds the {config.MAX_FILE_BYTES} byte "
+                "workspace file limit. Split it into smaller files.")
     path = _safe_path(name)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:

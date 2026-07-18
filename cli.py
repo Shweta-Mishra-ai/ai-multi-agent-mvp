@@ -39,10 +39,13 @@ def _render_events(events):
                 f"[cyan]{event['agent']}[/cyan] agent working..."
             )
         elif kind == "step_result":
+            status = event.get("status", "ok")
+            style = {"ok": "green", "failed": "red", "skipped": "yellow"}[status]
             console.print(Panel(
                 Markdown(str(event["output"])),
-                title=f"step {event['index'] + 1} · {event['agent']}",
-                border_style="green",
+                title=f"step {event['index'] + 1} · {event['agent']}"
+                      + ("" if status == "ok" else f" · {status}"),
+                border_style=style,
             ))
         elif kind == "verify":
             if event["satisfied"]:
@@ -52,6 +55,15 @@ def _render_events(events):
                     f"[yellow]✎ verifier requested a revision:[/yellow] "
                     f"{event['feedback']}"
                 )
+        elif kind == "error":
+            console.print(Panel(str(event["message"]), title="error",
+                                border_style="red"))
+        elif kind == "metrics":
+            console.print(
+                f"[dim]⏱ {event['duration_s']}s · {event['llm_calls']} LLM calls · "
+                f"{event['tool_calls']} tool calls · {event['tokens']} tokens · "
+                f"~${event['est_cost_usd']}[/dim]"
+            )
         elif kind == "done":
             final = event["output"]
     return final
@@ -132,6 +144,83 @@ def history(limit: int = typer.Option(10, help="How many sessions to show")):
 def ui():
     """Launch the Streamlit web frontend."""
     subprocess.run([sys.executable, "-m", "streamlit", "run", "app.py"])
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("0.0.0.0", help="Bind address"),
+    port: int = typer.Option(8000, help="Port"),
+):
+    """Launch the HTTP API (FastAPI/uvicorn) for programmatic access."""
+    import uvicorn
+
+    uvicorn.run("api:app", host=host, port=port)
+
+
+@app.command()
+def stats(limit: int = typer.Option(100, help="How many recent runs to aggregate")):
+    """Aggregate metrics of recent runs: duration, tokens, estimated cost."""
+    from agentos.memory import default_memory
+
+    rows = default_memory.recent_metrics(limit)
+    if not rows:
+        console.print("[dim]No runs recorded yet.[/dim]")
+        return
+    runs = len(rows)
+    table = Table(title=f"Last {runs} runs")
+    table.add_column("Metric")
+    table.add_column("Total", justify="right")
+    table.add_column("Avg / run", justify="right")
+    for key, label in [("duration_s", "duration (s)"), ("llm_calls", "LLM calls"),
+                       ("tool_calls", "tool calls"), ("tokens", "tokens"),
+                       ("est_cost_usd", "est. cost ($)")]:
+        total = sum(r.get(key, 0) for r in rows)
+        table.add_row(label, f"{round(total, 4)}", f"{round(total / runs, 4)}")
+    console.print(table)
+
+
+@app.command()
+def doctor():
+    """Check the deployment configuration and report problems."""
+    import os
+
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    table = Table(title="AgentOS doctor")
+    table.add_column("Check")
+    table.add_column("Status")
+
+    def row(name, ok, detail=""):
+        mark = "[green]✔[/green]" if ok else "[red]✘[/red]"
+        table.add_row(name, f"{mark} {detail}".strip())
+
+    row("OPENAI_API_KEY", bool(os.getenv("OPENAI_API_KEY")),
+        "" if os.getenv("OPENAI_API_KEY") else "missing — set it in .env")
+    row("Model", True, os.getenv("AGENTOS_MODEL", "gpt-4o-mini")
+        + (f" via {os.getenv('OPENAI_BASE_URL')}" if os.getenv("OPENAI_BASE_URL") else ""))
+    try:
+        from agentos.memory import default_memory
+
+        default_memory.recent_sessions(1)
+        row("Database", True, default_memory.db_path)
+    except Exception as e:
+        row("Database", False, str(e))
+    try:
+        from agentos.tools.files import _safe_path
+
+        probe = _safe_path(".doctor_probe")
+        with open(probe, "w") as f:
+            f.write("ok")
+        os.remove(probe)
+        row("Workspace", True, os.getenv("AGENTOS_WORKSPACE", "workspace"))
+    except Exception as e:
+        row("Workspace", False, str(e))
+    row("Web search", True,
+        "Tavily" if os.getenv("TAVILY_API_KEY") else "DuckDuckGo fallback")
+    row("Email sending", True,
+        "SMTP configured" if os.getenv("SMTP_HOST") else "draft-only mode (no SMTP)")
+    console.print(table)
 
 
 if __name__ == "__main__":
