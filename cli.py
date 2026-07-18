@@ -1,0 +1,227 @@
+"""AgentOS command-line interface.
+
+    python cli.py run "research AI agent frameworks and write a report"
+    python cli.py chat                 # interactive session with memory
+    python cli.py agents               # list registered agents and tools
+    python cli.py history              # recent sessions
+    python cli.py ui                   # launch the Streamlit frontend
+"""
+
+import subprocess
+import sys
+from datetime import datetime
+
+import typer
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.table import Table
+
+app = typer.Typer(add_completion=False, help="AgentOS — multi-agent orchestration")
+console = Console()
+
+
+def _render_events(events):
+    final = None
+    for event in events:
+        kind = event["type"]
+        if kind == "plan":
+            table = Table(title="📋 Plan", show_lines=False)
+            table.add_column("#", style="dim", width=3)
+            table.add_column("Agent", style="cyan")
+            table.add_column("Instruction")
+            for i, step in enumerate(event["steps"], 1):
+                table.add_row(str(i), step["agent"], step["instruction"])
+            console.print(table)
+        elif kind == "step_start":
+            console.print(
+                f"[dim]▶ step {event['index'] + 1}:[/dim] "
+                f"[cyan]{event['agent']}[/cyan] agent working..."
+            )
+        elif kind == "step_result":
+            status = event.get("status", "ok")
+            style = {"ok": "green", "failed": "red", "skipped": "yellow"}[status]
+            console.print(Panel(
+                Markdown(str(event["output"])),
+                title=f"step {event['index'] + 1} · {event['agent']}"
+                      + ("" if status == "ok" else f" · {status}"),
+                border_style=style,
+            ))
+        elif kind == "verify":
+            if event["satisfied"]:
+                console.print("[green]✔ verifier: output satisfies the request[/green]")
+            else:
+                console.print(
+                    f"[yellow]✎ verifier requested a revision:[/yellow] "
+                    f"{event['feedback']}"
+                )
+        elif kind == "error":
+            console.print(Panel(str(event["message"]), title="error",
+                                border_style="red"))
+        elif kind == "metrics":
+            console.print(
+                f"[dim]⏱ {event['duration_s']}s · {event['llm_calls']} LLM calls · "
+                f"{event['tool_calls']} tool calls · {event['tokens']} tokens · "
+                f"~${event['est_cost_usd']}[/dim]"
+            )
+        elif kind == "done":
+            final = event["output"]
+    return final
+
+
+@app.command()
+def run(
+    request: str = typer.Argument(..., help="What you want AgentOS to do"),
+    energy: str = typer.Option("Medium", help="Low / Medium / High"),
+):
+    """Run one request through the kernel and print the result."""
+    from agentos.kernel import Kernel
+
+    _render_events(Kernel().run(request, energy))
+
+
+@app.command()
+def chat(energy: str = typer.Option("Medium", help="Low / Medium / High")):
+    """Interactive session: follow-ups share memory and context."""
+    from agentos.kernel import Kernel
+
+    kernel = Kernel()
+    session_id = None
+    console.print("[bold]AgentOS chat[/bold] — type 'exit' to quit\n")
+    while True:
+        try:
+            user_input = console.input("[bold cyan]you ›[/bold cyan] ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if not user_input or user_input.lower() in {"exit", "quit"}:
+            break
+
+        events = kernel.run(user_input, energy, session_id=session_id)
+        for event in events:
+            if event["type"] == "plan":
+                session_id = event["session_id"]
+                agents = " → ".join(s["agent"] for s in event["steps"])
+                console.print(f"[dim]plan: {agents}[/dim]")
+            elif event["type"] == "step_start":
+                console.print(f"[dim]  {event['agent']} working...[/dim]")
+            elif event["type"] == "done":
+                console.print(Panel(Markdown(str(event["output"])),
+                                    border_style="green"))
+    console.print("[dim]bye[/dim]")
+
+
+@app.command()
+def agents():
+    """List registered agents and their tools."""
+    import agentos.agents  # noqa: F401
+    from agentos.registry import all_specs
+
+    table = Table(title="Registered agents")
+    table.add_column("Agent", style="cyan")
+    table.add_column("Purpose")
+    table.add_column("Tools", style="magenta")
+    for spec in all_specs():
+        table.add_row(spec.name, spec.description, ", ".join(spec.tools) or "—")
+    console.print(table)
+
+
+@app.command()
+def history(limit: int = typer.Option(10, help="How many sessions to show")):
+    """Show recent sessions from persistent memory."""
+    from agentos.memory import default_memory
+
+    table = Table(title="Recent sessions")
+    table.add_column("When", style="dim")
+    table.add_column("Session", style="cyan")
+    table.add_column("Request")
+    for s in default_memory.recent_sessions(limit):
+        when = datetime.fromtimestamp(s["created_at"]).strftime("%d %b %H:%M")
+        table.add_row(when, s["id"], s["title"])
+    console.print(table)
+
+
+@app.command()
+def ui():
+    """Launch the Streamlit web frontend."""
+    subprocess.run([sys.executable, "-m", "streamlit", "run", "app.py"])
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("0.0.0.0", help="Bind address"),
+    port: int = typer.Option(8000, help="Port"),
+):
+    """Launch the HTTP API (FastAPI/uvicorn) for programmatic access."""
+    import uvicorn
+
+    uvicorn.run("api:app", host=host, port=port)
+
+
+@app.command()
+def stats(limit: int = typer.Option(100, help="How many recent runs to aggregate")):
+    """Aggregate metrics of recent runs: duration, tokens, estimated cost."""
+    from agentos.memory import default_memory
+
+    rows = default_memory.recent_metrics(limit)
+    if not rows:
+        console.print("[dim]No runs recorded yet.[/dim]")
+        return
+    runs = len(rows)
+    table = Table(title=f"Last {runs} runs")
+    table.add_column("Metric")
+    table.add_column("Total", justify="right")
+    table.add_column("Avg / run", justify="right")
+    for key, label in [("duration_s", "duration (s)"), ("llm_calls", "LLM calls"),
+                       ("tool_calls", "tool calls"), ("tokens", "tokens"),
+                       ("est_cost_usd", "est. cost ($)")]:
+        total = sum(r.get(key, 0) for r in rows)
+        table.add_row(label, f"{round(total, 4)}", f"{round(total / runs, 4)}")
+    console.print(table)
+
+
+@app.command()
+def doctor():
+    """Check the deployment configuration and report problems."""
+    import os
+
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    table = Table(title="AgentOS doctor")
+    table.add_column("Check")
+    table.add_column("Status")
+
+    def row(name, ok, detail=""):
+        mark = "[green]✔[/green]" if ok else "[red]✘[/red]"
+        table.add_row(name, f"{mark} {detail}".strip())
+
+    row("OPENAI_API_KEY", bool(os.getenv("OPENAI_API_KEY")),
+        "" if os.getenv("OPENAI_API_KEY") else "missing — set it in .env")
+    row("Model", True, os.getenv("AGENTOS_MODEL", "gpt-4o-mini")
+        + (f" via {os.getenv('OPENAI_BASE_URL')}" if os.getenv("OPENAI_BASE_URL") else ""))
+    try:
+        from agentos.memory import default_memory
+
+        default_memory.recent_sessions(1)
+        row("Database", True, default_memory.db_path)
+    except Exception as e:
+        row("Database", False, str(e))
+    try:
+        from agentos.tools.files import _safe_path
+
+        probe = _safe_path(".doctor_probe")
+        with open(probe, "w") as f:
+            f.write("ok")
+        os.remove(probe)
+        row("Workspace", True, os.getenv("AGENTOS_WORKSPACE", "workspace"))
+    except Exception as e:
+        row("Workspace", False, str(e))
+    row("Web search", True,
+        "Tavily" if os.getenv("TAVILY_API_KEY") else "DuckDuckGo fallback")
+    row("Email sending", True,
+        "SMTP configured" if os.getenv("SMTP_HOST") else "draft-only mode (no SMTP)")
+    console.print(table)
+
+
+if __name__ == "__main__":
+    app()

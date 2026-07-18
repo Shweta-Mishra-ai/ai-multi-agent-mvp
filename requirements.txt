@@ -1,3 +1,9 @@
 streamlit
 openai
 python-dotenv
+typer
+rich
+requests
+ddgs
+fastapi
+uvicorn
