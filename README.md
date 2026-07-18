@@ -82,7 +82,7 @@ controllable from the **CLI** or a **web UI**, both running on the same core.
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env        # add your OPENAI_API_KEY
+cp .env.example .env        # add an API key (see below if you don't have one)
 
 python cli.py run "research the top 3 CRM tools and draft a comparison email"
 python cli.py run "email the report to boss@x.com" --approve   # allow real actions
@@ -181,6 +181,22 @@ tests/             # pytest suite (mocked LLM) — runs in CI on every push
 All optional settings live in `.env` (see `.env.example`): custom model or
 provider, Tavily API key for stronger web search, SMTP credentials to let the
 email agent actually send, and storage paths.
+
+### No OpenAI key? Run AgentOS for free
+
+AgentOS works with **any OpenAI-compatible provider** — just set
+`OPENAI_BASE_URL` + `AGENTOS_MODEL` in `.env` (exact copy-paste configs are
+in `.env.example`):
+
+| Provider | Cost | Get a key |
+|---|---|---|
+| **Groq** (recommended: fast, generous free tier) | free, no card | console.groq.com/keys |
+| **Google Gemini** | free tier, no card | aistudio.google.com/apikey |
+| **Ollama** (runs on your own machine) | 100% free, no key at all | ollama.com |
+
+Note: the planner and verifier use structured JSON output. Groq and Gemini
+support it; if a provider doesn't, AgentOS degrades gracefully (single-step
+plans, verifier skipped) instead of crashing.
 
 Without SMTP configured the email agent safely returns drafts only.
 Without search access the research agent answers from model knowledge and
