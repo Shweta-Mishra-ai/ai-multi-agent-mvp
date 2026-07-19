@@ -54,8 +54,10 @@ class Kernel:
     def __init__(self, memory=None):
         self.memory = memory or default_memory
 
-    def run(self, user_input, energy_level="Medium", session_id=None):
+    def run(self, user_input, energy_level="Medium", session_id=None,
+            approve=False):
         metrics = telemetry.start_run()
+        metrics.approved = bool(approve)
 
         problem = security.validate_request(user_input)
         if problem:
@@ -100,6 +102,10 @@ class Kernel:
                       for i, s in statuses.items() if s != "ok"]
             final = ("The run could not be fully completed.\n"
                      + "\n".join(failed))
+
+        pending = metrics.pending_actions()
+        if pending:
+            yield emit({"type": "approval_required", "actions": pending})
 
         try:
             self.memory.add_message(session_id, "user", user_input)
@@ -237,7 +243,10 @@ class Kernel:
                         "You are the quality verifier of a multi-agent system. "
                         "Judge whether the step outputs, taken together, satisfy "
                         "the user's request. Be pragmatic: minor style issues are "
-                        "fine, missing or wrong content is not."},
+                        "fine, missing or wrong content is not. An output that "
+                        "shows a prepared action awaiting the user's approval "
+                        "(e.g. an email draft pending confirmation) counts as "
+                        "satisfying the request."},
                     {"role": "user", "content":
                         f"User request: {user_input}\n\nStep outputs:\n{results}"},
                 ],

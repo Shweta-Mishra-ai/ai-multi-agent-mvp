@@ -17,7 +17,8 @@ class Agent:
     def __init__(self, spec):
         self.spec = spec
         self.max_turns = config.MAX_TOOL_TURNS
-        self.tool_schemas, self.tool_fns = toolbox.resolve(spec.tools)
+        self.tool_schemas, self.tool_fns, self.approval_tools = \
+            toolbox.resolve(spec.tools)
         self._schemas_by_name = {
             s["function"]["name"]: s["function"] for s in self.tool_schemas
         }
@@ -59,6 +60,16 @@ class Agent:
             if not isinstance(args, dict):
                 return "Tool error: arguments must be an object"
             args = self._validate_args(call.function.name, args)
+            if (call.function.name in self.approval_tools
+                    and not telemetry.approvals_granted()):
+                telemetry.record_pending(
+                    {"tool": call.function.name, "args": args})
+                return (
+                    "ACTION NOT EXECUTED: this action requires the user's "
+                    "approval first. Show the user a full preview of exactly "
+                    "what would be done, and tell them to approve and run "
+                    "again to execute it."
+                )
             return str(fn(**args))[:config.MAX_TOOL_OUTPUT_CHARS]
         except Exception as e:
             return f"Tool error: {e}"

@@ -25,6 +25,11 @@ user_input = st.text_area(
                 "and draft an email to my manager"
 )
 energy = st.selectbox("Your current energy level", ["Low", "Medium", "High"])
+approve = st.checkbox(
+    "Allow real-world actions (e.g. actually send email)",
+    help="Off = actions like sending email are prepared as previews only. "
+         "Tick this and run again to execute them.",
+)
 
 if st.button("Run AgentOS"):
     if user_input.strip() == "":
@@ -35,7 +40,8 @@ if st.button("Run AgentOS"):
         final_output = None
 
         for event in kernel.run(user_input, energy,
-                                session_id=st.session_state.session_id):
+                                session_id=st.session_state.session_id,
+                                approve=approve):
             if event["type"] == "plan":
                 st.session_state.session_id = event["session_id"]
                 with st.expander("📋 Plan", expanded=True):
@@ -65,6 +71,13 @@ if st.button("Run AgentOS"):
                     st.caption("✔ Verifier: output satisfies the request")
                 else:
                     st.warning(f"Verifier requested a revision: {event['feedback']}")
+            elif event["type"] == "approval_required":
+                actions = ", ".join(a["tool"] for a in event["actions"])
+                st.warning(
+                    f"⚠ Prepared but NOT executed: {actions}. Review the "
+                    "preview above, tick “Allow real-world actions”, and run "
+                    "again to execute."
+                )
             elif event["type"] == "error":
                 st.error(event["message"])
             elif event["type"] == "metrics":

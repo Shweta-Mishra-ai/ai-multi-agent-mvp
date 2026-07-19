@@ -18,6 +18,7 @@ from agentos.tools import tool
         },
         "required": ["to", "subject", "body"],
     },
+    requires_approval=True,
 )
 def send_email(to, subject, body):
     host = os.getenv("SMTP_HOST")

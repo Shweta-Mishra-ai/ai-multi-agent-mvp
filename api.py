@@ -31,6 +31,11 @@ class RunRequest(BaseModel):
     request: str = Field(min_length=1, max_length=config.MAX_INPUT_CHARS)
     energy: str = Field(default="Medium", pattern="^(Low|Medium|High)$")
     session_id: Optional[str] = Field(default=None, max_length=32)
+    approve: bool = Field(
+        default=False,
+        description="Execute real-world actions (e.g. send email). When "
+                    "false, such actions are returned as previews in an "
+                    "approval_required event.")
 
 
 @app.get("/health")
@@ -50,7 +55,8 @@ def agents():
 def run(body: RunRequest):
     def stream():
         for event in Kernel().run(body.request, body.energy,
-                                  session_id=body.session_id):
+                                  session_id=body.session_id,
+                                  approve=body.approve):
             yield json.dumps(event, default=str) + "\n"
 
     return StreamingResponse(stream(), media_type="application/x-ndjson")
