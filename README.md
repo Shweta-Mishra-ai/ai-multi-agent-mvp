@@ -116,8 +116,21 @@ product can embed AgentOS.
 
 ### Deploying to Render (one click)
 
-Push this repo, then in Render: **New → Blueprint → select the repo** —
-`render.yaml` configures the service. You'll be prompted for secrets.
+In Render: **New → Blueprint → select the repo → pick the
+`claude/multi-agent-orchestration-xk52e1` branch**. `render.yaml`
+configures **two services** from the same code:
+
+- **`agentos-ui`** — a clickable website (Streamlit). This is what most
+  people want: open the URL Render gives you, type a request, click
+  "Run AgentOS".
+- **`agentos-api`** — the HTTP API, for integrating AgentOS into another
+  app or script.
+
+You'll be prompted once for `OPENAI_API_KEY` (shared by both services);
+if using Groq/Gemini instead of OpenAI, also fill in `OPENAI_BASE_URL`
+and `AGENTOS_MODEL` in the group's dashboard settings after the first
+deploy. Each service takes a few minutes to build; Render gives each one
+its own URL when ready.
 
 ### 🔑 Which keys go where
 

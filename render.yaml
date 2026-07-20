@@ -1,12 +1,18 @@
-# Render blueprint: deploy the AgentOS HTTP API with one click
-# (Render dashboard -> New -> Blueprint -> point at this repo).
+# Render blueprint: deploy AgentOS with one click
+# (Render dashboard -> New -> Blueprint -> point at this repo, pick this branch).
+#
+# This deploys TWO services from the same code:
+#   agentos-ui   -> a clickable website (Streamlit) - use this if you just
+#                   want to open a link in your browser and use AgentOS
+#   agentos-api  -> the HTTP API - use this to integrate AgentOS into
+#                   another app, script, or automation
 #
 # Required secret (set in the Render dashboard when prompted):
 #   OPENAI_API_KEY   — works with ANY OpenAI-compatible provider's key,
 #                      not only OpenAI's (e.g. a free Groq or Gemini key).
 #
 # If using a non-OpenAI provider, also edit AGENTOS_MODEL below and set
-# OPENAI_BASE_URL in the dashboard after the first deploy, e.g. for Groq:
+# OPENAI_BASE_URL, e.g. for Groq:
 #   AGENTOS_MODEL      = llama-3.3-70b-versatile
 #   OPENAI_BASE_URL    = https://api.groq.com/openai/v1
 #
@@ -14,14 +20,11 @@
 #   TAVILY_API_KEY (better web search), SMTP_* (real email sending)
 #
 # NOTE: on the free plan storage is ephemeral — memory (SQLite) resets on
-# each deploy. Upgrade the plan and attach a disk at /data for persistence.
+# each deploy/restart, and is not shared between the two services. Upgrade
+# the plan and attach a disk at /data for persistence.
 
-services:
-  - type: web
-    name: agentos-api
-    runtime: docker
-    plan: free
-    healthCheckPath: /health
+envVarGroups:
+  - name: agentos-secrets
     envVars:
       - key: OPENAI_API_KEY
         sync: false          # prompted securely in the dashboard, never in git
@@ -31,5 +34,25 @@ services:
         sync: false
       - key: AGENTOS_MODEL
         value: gpt-4o-mini    # e.g. llama-3.3-70b-versatile for Groq
+
+services:
+  - type: web
+    name: agentos-ui
+    runtime: docker
+    plan: free
+    dockerCommand: >
+      streamlit run app.py --server.port 8000 --server.address 0.0.0.0
+      --server.headless true
+    healthCheckPath: /_stcore/health
+    envVars:
+      - fromGroup: agentos-secrets
+
+  - type: web
+    name: agentos-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: agentos-secrets
       - key: AGENTOS_RATE_LIMIT_PER_MIN
         value: "10"
