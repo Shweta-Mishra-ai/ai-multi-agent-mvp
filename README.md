@@ -57,24 +57,31 @@ controllable from the **CLI** or a **web UI**, both running on the same core.
 - **Budgets** — hard per-run deadline, max steps, max tool turns, and
   request-size limits protect latency and cost
 - **Security** — input validation, per-deployment rate limiting, SSRF guard
-  (agents cannot fetch internal/private network addresses), tool-argument
-  schema validation, path-traversal-safe workspace, safe (AST-based)
-  calculator, secrets only via environment
+  with per-redirect-hop re-validation and a response size cap (agents
+  cannot fetch internal/private network addresses, including via a
+  redirect chain), tool-argument schema validation, path-traversal-safe
+  workspace, safe (AST-based) calculator, secrets only via environment
 - **Observability** — structured logging, and per-run metrics (duration,
   LLM calls, tool calls, tokens, estimated cost) persisted and aggregated
   via `python cli.py stats`
 - **Human-in-the-loop approval gates** — irreversible actions (like actually
   sending an email) are never executed silently: the agent prepares a full
-  preview, the run emits an `approval_required` event, and the action only
-  executes when the user approves (CLI `--approve` / confirm prompt, web UI
-  checkbox, API `"approve": true`)
+  preview, the run emits an `approval_required` event, and approving
+  executes **exactly the previewed tool call** directly (CLI/web UI
+  confirm, or `POST /execute`) rather than re-running the whole plan —
+  re-running would ask the LLM to regenerate its output, which is
+  non-deterministic and could execute something different from what was
+  reviewed, as well as doubling LLM cost
 - **Live evals** — a golden routing test set (`evals/`) measures planner
   accuracy against the real LLM; run locally or via the manual `Evals`
   GitHub Actions workflow
 - **Health & diagnostics** — `/health` endpoint for load balancers and
   `python cli.py doctor` to validate a deployment's configuration
 - **Tested + CI** — pytest suite (kernel orchestration, parallelism, failure
-  propagation, security guards, API) runs on every push via GitHub Actions
+  propagation, security guards, concurrent-load isolation, API) runs on
+  every push via GitHub Actions, gated at 80% coverage (currently ~89%)
+- **Data retention** — `python cli.py prune` deletes old events/messages/
+  metrics so the database doesn't grow unbounded under daily use
 
 ---
 
@@ -90,6 +97,7 @@ python cli.py chat          # interactive session with memory
 python cli.py agents        # list registered agents and their tools
 python cli.py history       # recent sessions from persistent memory
 python cli.py stats         # aggregated run metrics (tokens, cost, duration)
+python cli.py prune         # delete old records (e.g. a weekly cron)
 python cli.py doctor        # validate the deployment configuration
 python cli.py serve         # HTTP API (FastAPI) on :8000
 python cli.py ui            # launch the Streamlit web frontend
@@ -108,7 +116,14 @@ curl localhost:8000/agents
 curl -N -X POST localhost:8000/run \
      -H 'content-type: application/json' \
      -d '{"request": "research AI agent frameworks and write a report"}'
-# → streams NDJSON events: plan, step_start, step_result, verify, done, metrics
+# → streams NDJSON events: plan, step_start, step_result, verify, done,
+#   approval_required (if an irreversible action was blocked), metrics
+
+# If a run's events include approval_required, execute exactly that
+# preview (never re-runs the plan/agents):
+curl -X POST localhost:8000/execute \
+     -H 'content-type: application/json' \
+     -d '{"actions": [{"tool": "send_email", "args": {...}}]}'
 ```
 
 The API streams the exact same event protocol as the CLI and web UI, so any
@@ -219,7 +234,10 @@ says so explicitly.
 
 ## 🔮 Roadmap
 
-- API authentication (keys/OAuth) + multi-tenant isolation
+- API authentication (keys/OAuth) + multi-tenant isolation — needed for
+  **per-caller** rate limiting; today's rate limit is a single global
+  bucket shared by every caller on a deployment, since there's no identity
+  concept yet
 - Scheduled / recurring runs
 - Vector memory for semantic recall
 - Postgres backend option for horizontal scaling

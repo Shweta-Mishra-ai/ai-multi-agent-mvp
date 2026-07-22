@@ -24,6 +24,7 @@ console = Console()
 def _render_events(events):
     final = None
     approval_needed = False
+    pending_actions = []
     for event in events:
         kind = event["type"]
         if kind == "plan":
@@ -58,6 +59,7 @@ def _render_events(events):
                 )
         elif kind == "approval_required":
             approval_needed = True
+            pending_actions = event["actions"]
             lines = "\n".join(
                 f"• {a['tool']}({', '.join(f'{k}={v!r}' for k, v in a['args'].items())})"
                 for a in event["actions"]
@@ -77,7 +79,19 @@ def _render_events(events):
             )
         elif kind == "done":
             final = event["output"]
-    return {"final": final, "approval_needed": approval_needed}
+    return {"final": final, "approval_needed": approval_needed,
+            "pending_actions": pending_actions}
+
+
+def _execute_approved(pending_actions):
+    """Execute exactly the previewed actions - no re-planning, no re-running
+    any agent, so what gets executed is guaranteed to match what was shown."""
+    from agentos.kernel import Kernel
+
+    for result in Kernel().execute_approved(pending_actions):
+        console.print(Panel(str(result["result"]),
+                            title=f"executed: {result['tool']}",
+                            border_style="green"))
 
 
 @app.command()
@@ -94,8 +108,8 @@ def run(
     outcome = _render_events(Kernel().run(request, energy, approve=approve))
     if outcome["approval_needed"]:
         if sys.stdin.isatty() and typer.confirm(
-                "Approve these actions and run again to execute them?"):
-            _render_events(Kernel().run(request, energy, approve=True))
+                "Approve and execute exactly the action(s) previewed above?"):
+            _execute_approved(outcome["pending_actions"])
         else:
             console.print("[yellow]Re-run with --approve to execute "
                           "the pending actions.[/yellow]")
@@ -118,6 +132,7 @@ def chat(energy: str = typer.Option("Medium", help="Low / Medium / High")):
             break
 
         approval_needed = False
+        pending_actions = []
         for event in kernel.run(user_input, energy, session_id=session_id):
             if event["type"] == "plan":
                 session_id = event["session_id"]
@@ -127,18 +142,16 @@ def chat(energy: str = typer.Option("Medium", help="Low / Medium / High")):
                 console.print(f"[dim]  {event['agent']} working...[/dim]")
             elif event["type"] == "approval_required":
                 approval_needed = True
+                pending_actions = event["actions"]
             elif event["type"] == "error":
                 console.print(Panel(str(event["message"]), border_style="red"))
             elif event["type"] == "done":
                 console.print(Panel(Markdown(str(event["output"])),
                                     border_style="green"))
         if approval_needed and typer.confirm(
-                "⚠ Real-world actions await approval. Approve and execute?"):
-            for event in kernel.run(user_input, energy,
-                                    session_id=session_id, approve=True):
-                if event["type"] == "done":
-                    console.print(Panel(Markdown(str(event["output"])),
-                                        border_style="green"))
+                "⚠ Real-world actions await approval. Approve and execute "
+                "exactly what was previewed?"):
+            _execute_approved(pending_actions)
     console.print("[dim]bye[/dim]")
 
 
@@ -208,6 +221,21 @@ def stats(limit: int = typer.Option(100, help="How many recent runs to aggregate
                        ("est_cost_usd", "est. cost ($)")]:
         total = sum(r.get(key, 0) for r in rows)
         table.add_row(label, f"{round(total, 4)}", f"{round(total / runs, 4)}")
+    console.print(table)
+
+
+@app.command()
+def prune(days: int = typer.Option(30, help="Delete records older than this many days")):
+    """Delete old events/messages/metrics so the database doesn't grow
+    unbounded under daily use. Safe to run anytime (e.g. a weekly cron)."""
+    from agentos.memory import default_memory
+
+    result = default_memory.prune(older_than_days=days)
+    table = Table(title=f"Pruned records older than {days} days")
+    table.add_column("Table")
+    table.add_column("Deleted", justify="right")
+    for k, v in result.items():
+        table.add_row(k, str(v))
     console.print(table)
 
 

@@ -1,6 +1,7 @@
 import contextvars
 import json
 import time
+import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 from agentos import config, security, telemetry
@@ -54,6 +55,32 @@ class Kernel:
     def __init__(self, memory=None):
         self.memory = memory or default_memory
 
+    def execute_approved(self, actions):
+        """Directly execute previously-previewed tool calls with their exact
+        recorded arguments - no re-planning and no re-running any agent.
+
+        This guarantees the action actually executed is identical to the one
+        the user reviewed: re-running the whole kernel would ask the LLM to
+        regenerate its output, which is non-deterministic and could send a
+        different email than the one that was previewed, as well as costing
+        a second full round of LLM calls just to reach the approval gate."""
+        from agentos.tools import TOOLS
+
+        results = []
+        for action in actions:
+            entry = TOOLS.get(action.get("tool"))
+            if entry is None:
+                results.append({**action, "result": "Unknown tool"})
+                continue
+            try:
+                result = str(entry["fn"](**action.get("args", {})))[
+                    :config.MAX_TOOL_OUTPUT_CHARS]
+            except Exception as e:
+                result = f"Tool error: {e}"
+                log.warning("approved action %s failed: %s", action.get("tool"), e)
+            results.append({**action, "result": result})
+        return results
+
     def run(self, user_input, energy_level="Medium", session_id=None,
             approve=False):
         metrics = telemetry.start_run()
@@ -68,9 +95,17 @@ class Kernel:
                    "message": "Rate limit reached — please wait a minute and try again."}
             return
 
-        if session_id is None:
-            session_id = self.memory.create_session(user_input)
-        history = self.memory.get_messages(session_id, limit=8)
+        try:
+            if session_id is None:
+                session_id = self.memory.create_session(user_input)
+            history = self.memory.get_messages(session_id, limit=8)
+        except Exception as e:
+            # A transient storage error here must not crash the whole run:
+            # degrade to a fresh in-memory-only session (no history) rather
+            # than letting the generator raise mid-stream.
+            log.warning("memory unavailable, continuing without history: %s", e)
+            session_id = session_id or uuid.uuid4().hex[:12]
+            history = []
 
         def emit(event):
             try:

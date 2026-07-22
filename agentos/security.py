@@ -20,7 +20,13 @@ def validate_request(text):
 
 
 def check_rate_limit(memory):
-    """True if this deployment is under its runs-per-minute budget."""
+    """True if this deployment is under its runs-per-minute budget.
+
+    NOTE: this is a single global bucket shared by every caller - there is
+    no per-user/per-IP identity anywhere in AgentOS yet, so one very active
+    user can exhaust the budget for everyone else on a shared deployment.
+    Per-caller limiting needs an identity concept (API keys, sessions tied
+    to a user) - tracked as a roadmap item, not fixed by this check alone."""
     try:
         return memory.runs_in_last_minute() < config.RATE_LIMIT_PER_MIN
     except Exception:

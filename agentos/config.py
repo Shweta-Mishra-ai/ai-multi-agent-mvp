@@ -4,16 +4,20 @@ so operators can adjust behavior without touching code."""
 import os
 
 
-def _int(name, default):
+def _int(name, default, minimum=1):
+    """Read a positive-int env var, clamped to a sane minimum so a
+    misconfigured value (0, negative, non-numeric) can't crash things
+    downstream (e.g. ThreadPoolExecutor(max_workers=0) raises ValueError)."""
     try:
-        return int(os.getenv(name, default))
+        value = int(os.getenv(name, default))
     except (TypeError, ValueError):
         return default
+    return value if value >= minimum else minimum
 
 
 # LLM resilience
 LLM_TIMEOUT = _int("AGENTOS_LLM_TIMEOUT", 60)          # seconds per LLM call
-LLM_RETRIES = _int("AGENTOS_LLM_RETRIES", 3)           # automatic retries (429/5xx)
+LLM_RETRIES = _int("AGENTOS_LLM_RETRIES", 3, minimum=0)  # automatic retries (429/5xx)
 
 # Run budgets (protect cost and latency)
 MAX_STEPS = _int("AGENTOS_MAX_STEPS", 5)

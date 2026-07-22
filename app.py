@@ -18,6 +18,8 @@ with st.sidebar:
 
 if "session_id" not in st.session_state:
     st.session_state.session_id = None
+if "pending_actions" not in st.session_state:
+    st.session_state.pending_actions = []
 
 user_input = st.text_area(
     "What do you want to do?",
@@ -36,8 +38,14 @@ if st.button("Run AgentOS"):
         st.warning("Please enter a task.")
     else:
         kernel = Kernel()
-        status = None
+        # Keyed by step index (not a single shared variable): independent
+        # steps run in parallel, so a second step's step_start can arrive
+        # before the first step's step_result - a single shared widget
+        # reference would have the second step's start overwrite the
+        # reference to the first step's box, misattributing its result.
+        status_by_index = {}
         final_output = None
+        st.session_state.pending_actions = []
 
         for event in kernel.run(user_input, energy,
                                 session_id=st.session_state.session_id,
@@ -48,12 +56,13 @@ if st.button("Run AgentOS"):
                     for i, step in enumerate(event["steps"], 1):
                         st.markdown(f"**{i}. {step['agent']}** — {step['instruction']}")
             elif event["type"] == "step_start":
-                status = st.status(
+                status_by_index[event["index"]] = st.status(
                     f"Step {event['index'] + 1}: {event['agent']} agent working...",
                     state="running",
                 )
             elif event["type"] == "step_result":
                 step_status = event.get("status", "ok")
+                status = status_by_index.get(event["index"])
                 if status is not None:
                     icon = {"ok": "✅", "failed": "❌", "skipped": "⏭️"}[step_status]
                     status.update(
@@ -62,7 +71,6 @@ if st.button("Run AgentOS"):
                     )
                     with status:
                         st.write(event["output"])
-                    status = None
                 elif step_status != "ok":
                     st.warning(f"Step {event['index'] + 1} ({event['agent']}): "
                                f"{event['output']}")
@@ -72,11 +80,12 @@ if st.button("Run AgentOS"):
                 else:
                     st.warning(f"Verifier requested a revision: {event['feedback']}")
             elif event["type"] == "approval_required":
+                st.session_state.pending_actions = event["actions"]
                 actions = ", ".join(a["tool"] for a in event["actions"])
                 st.warning(
                     f"⚠ Prepared but NOT executed: {actions}. Review the "
-                    "preview above, tick “Allow real-world actions”, and run "
-                    "again to execute."
+                    "preview above, then use the button below to approve "
+                    "and execute exactly what was previewed."
                 )
             elif event["type"] == "error":
                 st.error(event["message"])
@@ -92,3 +101,14 @@ if st.button("Run AgentOS"):
         if final_output is not None:
             st.success("Result")
             st.write(final_output)
+
+if st.session_state.pending_actions:
+    st.divider()
+    st.warning(f"{len(st.session_state.pending_actions)} action(s) awaiting approval.")
+    if st.button("✅ Approve & execute exactly what was previewed"):
+        # Executes the exact recorded tool calls directly - never re-runs
+        # the plan/agents, so what gets executed always matches the preview.
+        for result in Kernel().execute_approved(st.session_state.pending_actions):
+            st.success(f"Executed {result['tool']}")
+            st.write(result["result"])
+        st.session_state.pending_actions = []

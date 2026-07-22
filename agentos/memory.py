@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import sqlite3
@@ -34,6 +35,10 @@ CREATE TABLE IF NOT EXISTS metrics (
     ts REAL,
     payload TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
+CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(type, ts);
+CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics(ts);
 """
 
 
@@ -48,10 +53,21 @@ class Memory:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
 
+    @contextlib.contextmanager
     def _conn(self):
+        # Using a bare sqlite3.Connection as `with conn:` only commits or
+        # rolls back the transaction on exit - it does NOT close the
+        # connection, so every call would leak one, relying solely on GC to
+        # eventually close it. Wrap it so callers keep writing
+        # `with self._conn() as conn:` (getting the same commit/rollback
+        # behavior) while the connection is *also* guaranteed to close.
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.execute("PRAGMA busy_timeout=5000")
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     # --- sessions & conversation ---
 
@@ -145,6 +161,28 @@ class Memory:
                     "SELECT key, value FROM kv ORDER BY updated_at DESC LIMIT 20"
                 ).fetchall()
         return dict(rows)
+
+    # --- retention ---
+
+    def prune(self, older_than_days=30):
+        """Delete events/messages/metrics older than N days, and sessions
+        that no longer have any messages. Without this, a daily-use
+        deployment's database grows unbounded forever (events are logged
+        for every single run). The kv store is untouched - it's meant to
+        persist indefinitely."""
+        cutoff = time.time() - older_than_days * 86400
+        with self._conn() as conn:
+            events = conn.execute(
+                "DELETE FROM events WHERE ts < ?", (cutoff,)).rowcount
+            messages = conn.execute(
+                "DELETE FROM messages WHERE ts < ?", (cutoff,)).rowcount
+            metrics = conn.execute(
+                "DELETE FROM metrics WHERE ts < ?", (cutoff,)).rowcount
+            sessions = conn.execute(
+                "DELETE FROM sessions WHERE created_at < ? AND id NOT IN "
+                "(SELECT DISTINCT session_id FROM messages)", (cutoff,)).rowcount
+        return {"events": events, "messages": messages,
+                "metrics": metrics, "sessions": sessions}
 
 
 default_memory = Memory()
