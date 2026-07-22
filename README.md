@@ -328,3 +328,10 @@ says so explicitly.
 - Scheduled / recurring runs
 - Vector memory for semantic recall
 - Postgres backend option for horizontal scaling
+
+---
+
+## 📄 License
+
+All rights reserved — see [`LICENSE`](LICENSE). This is proprietary
+software; no copying, modification, or redistribution without permission.
