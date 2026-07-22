@@ -2,13 +2,16 @@
 
 An **agentic OS**: a kernel that plans work, schedules specialized AI agents,
 gives them real-world tools, verifies the result, and remembers everything —
-controllable from the **CLI** or a **web UI**, both running on the same core.
+controllable from a **React web app**, the **CLI**, or the **HTTP API**, all
+three running on the same core. The web app is a real production build
+(React + TypeScript + Tailwind), served by the API itself as one deployable
+service — no separate frontend server, no CORS setup needed.
 
 ```
                 ┌────────────────────────────────────────────┐
-   CLI ────────►│                 KERNEL                     │
+   React UI ───►│                 KERNEL                     │
                 │  plan → schedule agents → verify → deliver │
-   Web UI ─────►│                                            │
+   CLI ────────►│                                            │
                 └───────┬──────────────┬───────────┬─────────┘
                         │              │           │
                  ┌──────▼─────┐ ┌──────▼────┐ ┌────▼──────┐
@@ -39,8 +42,9 @@ controllable from the **CLI** or a **web UI**, both running on the same core.
   the request; if not, the responsible agent gets one revision round
 - **Persistent memory** — SQLite sessions, conversation history for
   follow-ups, and a key-value store agents can read/write across sessions
-- **Frontend-agnostic kernel** — the kernel emits an event stream; CLI and
-  Streamlit are thin renderers over the same events (an HTTP API would be too)
+- **Frontend-agnostic kernel** — the kernel emits an event stream; the React
+  UI and the CLI are both thin renderers over the exact same events coming
+  from the HTTP API
 - **Provider-agnostic** — works with any OpenAI-compatible endpoint
   (OpenAI, Ollama, vLLM…) via `OPENAI_BASE_URL` + `AGENTOS_MODEL`
 
@@ -98,9 +102,6 @@ controllable from the **CLI** or a **web UI**, both running on the same core.
   `python cli.py doctor` to validate a deployment's configuration, and
   `python scripts/smoke_test.py <url>` to verify a live deployment
   actually works right after deploying (not just that it started)
-- **UI access control** — the Streamlit UI (which has no API-key concept
-  of its own) can require a shared passphrase via `AGENTOS_UI_PASSWORD`
-  before making it public
 - **Tested + CI** — pytest suite (kernel orchestration, parallelism, failure
   propagation, security guards, concurrent-load isolation, API) runs on
   every push via GitHub Actions, gated at 80% coverage (currently ~92%,
@@ -137,8 +138,29 @@ python cli.py keys create "intern" --no-execute  # restricted: can preview, neve
 python cli.py keys list     # list keys (never shows the secret again)
 python cli.py keys revoke <id>          # revoke a key immediately
 python cli.py doctor        # validate the deployment configuration
-python cli.py serve         # HTTP API (FastAPI) on :8000
-python cli.py ui            # launch the Streamlit web frontend
+python cli.py serve         # HTTP API - AND the web UI, once it's built (below)
+```
+
+### 🖥️ Web UI (React + TypeScript + Tailwind)
+
+```bash
+cd frontend
+npm install
+npm run build          # -> frontend/dist, served automatically by `cli.py serve`
+```
+
+Then just `python cli.py serve` and open `http://localhost:8000` — the API
+serves the built UI at `/` and its own routes at `/health`, `/agents`,
+`/run`, etc., all from one process. No `frontend/dist`? The API still runs
+fine, it just has no `/` route (a 404 there is expected, not a bug — the
+API's own paths and `/docs` still work).
+
+For frontend development with hot reload, run the API separately and point
+Vite's dev server at it:
+
+```bash
+python cli.py serve                    # terminal 1: API on :8000
+python cli.py ui                       # terminal 2: Vite dev server on :5173, proxies to :8000
 ```
 
 ---
@@ -194,56 +216,40 @@ else. Keys are stored as a salted hash (never in plaintext) with
 constant-time comparison; `cli.py keys list` shows metadata only, never
 the secret itself. `/health` and `/agents` never require a key.
 
-On Render, manage keys via the **Shell** tab on the `agentos-api`
-service (`python cli.py keys create "..."`) since there's no key-creation
-HTTP endpoint by design — exposing key creation over the network would
-let anyone mint their own key.
+On Render, manage keys via the service's **Shell** tab
+(`python cli.py keys create "..."`) since there's no key-creation HTTP
+endpoint by design — exposing key creation over the network would let
+anyone mint their own key.
 
 ### Deploying to Render (one click)
 
 In Render: **New → Blueprint → select the repo → pick the
 `claude/multi-agent-orchestration-xk52e1` branch**. `render.yaml`
-configures **two services** from the same code:
+configures **one service** — the Dockerfile builds the React frontend
+(Node, build-time only) and copies the static output into the same image
+that runs the Python API, so a single container serves both the web app
+(at `/`) and the API (at `/health`, `/agents`, `/run`, etc.).
 
-- **`agentos-ui`** — a clickable website (Streamlit). This is what most
-  people want: open the URL Render gives you, type a request, click
-  "Run AgentOS".
-- **`agentos-api`** — the HTTP API, for integrating AgentOS into another
-  app or script.
-
-You'll be prompted once for `OPENAI_API_KEY` (shared by both services);
-if using Groq/Gemini instead of OpenAI, also fill in `OPENAI_BASE_URL`
-and `AGENTOS_MODEL` in the group's dashboard settings after the first
-deploy. Each service takes a few minutes to build; Render gives each one
-its own URL when ready.
-
-**The two services are fully independent** - separate containers, separate
-databases. A session started on `agentos-ui` won't show up in
-`agentos-api`'s history (or vice versa), and an API key created for
-`agentos-api` doesn't apply to the UI. This is fine for how they're used
-today (the UI has no HTTP API auth concept - see below), but keep it in
-mind if you build automation that expects them to share state.
-
-**Protect the UI before making it public**: unlike the API (which locks
-down once you create a key), the Streamlit UI has no built-in gate - set
-`AGENTOS_UI_PASSWORD` in the `agentos-ui` service's environment to require
-a shared passphrase before anyone can use it and burn your LLM budget. In
-the free tier's shared/reused rate-limit bucket (open mode), this is your
-only protection for the UI.
+You'll be prompted for `OPENAI_API_KEY`; if using Groq/Gemini instead of
+OpenAI, also fill in `OPENAI_BASE_URL` and `AGENTOS_MODEL` in the
+dashboard after the first deploy. The build takes a few minutes longer
+than before (it now compiles the frontend too); Render gives you one URL
+when ready — open it directly, that's the app.
 
 ### ✅ Launch checklist
 
 1. `python cli.py doctor` locally - confirm `OPENAI_API_KEY` and provider
    settings are right before deploying
 2. Deploy the Render blueprint (above)
-3. Set `AGENTOS_UI_PASSWORD` on `agentos-ui` if it'll be public
-4. Create at least one API key for `agentos-api` if it'll be public:
-   open the service's **Shell** tab on Render and run
-   `python cli.py keys create "some name"`
-5. Verify the live deployment actually works:
-   `python scripts/smoke_test.py https://your-api-url.onrender.com`
+3. Create at least one API key if this will be public: open the
+   service's **Shell** tab on Render and run
+   `python cli.py keys create "some name"` — once any key exists, both
+   the API and the web UI (which calls the API to do anything) require
+   one, so this is your actual "make it private" switch
+4. Verify the live deployment actually works:
+   `python scripts/smoke_test.py https://your-app-url.onrender.com`
    (add `--key ak_...` if you created one)
-6. Schedule `python cli.py prune` periodically (e.g. a weekly Render cron
+5. Schedule `python cli.py prune` periodically (e.g. a weekly Render cron
    job) so the database doesn't grow unbounded under daily use
 
 ### 🔑 Which keys go where
@@ -274,7 +280,7 @@ Setup:
 1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials),
    create an **OAuth 2.0 Client ID** (application type: Web application).
 2. Add an **authorized redirect URI**: `https://<your-api-domain>/auth/google/callback`
-3. Set three env vars on the `agentos-api` service: `GOOGLE_CLIENT_ID`,
+3. Set three env vars on the service: `GOOGLE_CLIENT_ID`,
    `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` (the exact URL from
    step 2 - it's required explicitly rather than auto-detected, since a
    reverse proxy like Render's can make requests appear to arrive over
@@ -331,8 +337,15 @@ agentos/
                    #   (workspace files & memory scoped per caller)
 cli.py             # Typer + Rich CLI (run, chat, agents, history, stats,
                    #   prune, keys create/list/revoke, doctor, serve, ui)
-api.py             # FastAPI HTTP API (NDJSON event stream)
-app.py             # Streamlit frontend over the same kernel
+api.py             # FastAPI HTTP API (NDJSON event stream) + serves the
+                   #   built frontend/dist at "/" if present
+frontend/          # React + TypeScript + Tailwind web UI (Vite)
+  src/
+    api.ts         # fetch helpers + NDJSON streaming parser for /run
+    runReducer.ts  # event-stream -> UI state (mirrors the kernel's event types)
+    types.ts       # TypeScript types matching the API's event/response shapes
+    components/    # Sidebar, RequestForm, RunView, ApprovalPanel, etc.
+  dist/            # production build output (gitignored; `npm run build`)
 scripts/
   smoke_test.py    # post-deploy check: hits a live URL's /health, /agents, /run
 tests/             # pytest suite (mocked LLM) — runs in CI on every push
@@ -370,11 +383,11 @@ says so explicitly.
 
 ## 🔮 Roadmap
 
-- OAuth / SSO in addition to API keys, and per-key scopes (e.g. read-only,
-  no-approval-gate-bypass)
+- Session/conversation history in the web UI (resume a past run, browse
+  `cli.py history` visually)
+- Additional OAuth providers beyond Google (GitHub, Microsoft)
 - Per-tenant quotas beyond rate limiting (e.g. workspace disk quotas)
 - Scheduled / recurring runs
-- Vector memory for semantic recall
 - Postgres backend option for horizontal scaling
 
 ---

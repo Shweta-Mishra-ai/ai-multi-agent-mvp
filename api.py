@@ -22,10 +22,14 @@ public deployment should create keys for real users.
 import html
 import json
 import logging
+import os
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import agentos
@@ -42,6 +46,19 @@ app = FastAPI(
     title="AgentOS API",
     version=agentos.__version__,
     description="Multi-agent orchestration: plan → agents → tools → verify.",
+)
+
+# AgentOS is designed to be embeddable in other products (see README), so
+# CORS is open by default; restrict it by setting a comma-separated
+# AGENTOS_CORS_ORIGINS if this API should only ever be called from one
+# specific frontend origin.
+_cors_origins = os.getenv("AGENTOS_CORS_ORIGINS", "*")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"] if _cors_origins == "*" else _cors_origins.split(","),
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -198,3 +215,17 @@ def google_callback(code: Optional[str] = None, state: Optional[str] = None,
         <pre style="background:#eee;padding:1em;word-wrap:break-word;">{safe_key}</pre>
         <p>Use it as a header: <code>Authorization: Bearer {safe_key}</code></p>
     """)
+
+
+# Serve the built React frontend (frontend/dist) at "/", if present. This
+# is mounted LAST so it never shadows the API routes above (Starlette
+# matches routes in registration order) - and only if the build actually
+# exists, so running the API without ever building the frontend (e.g.
+# the test suite, or local API-only development) still works rather than
+# raising at import time.
+_frontend_dist = Path(__file__).parent / "frontend" / "dist"
+if _frontend_dist.is_dir():
+    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
+else:
+    log.info("frontend/dist not found - serving API only (run "
+             "`npm run build` in frontend/ to enable the web UI)")

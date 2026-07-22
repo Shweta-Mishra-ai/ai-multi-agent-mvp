@@ -1,11 +1,10 @@
 # Render blueprint: deploy AgentOS with one click
 # (Render dashboard -> New -> Blueprint -> point at this repo, pick this branch).
 #
-# This deploys TWO services from the same code:
-#   agentos-ui   -> a clickable website (Streamlit) - use this if you just
-#                   want to open a link in your browser and use AgentOS
-#   agentos-api  -> the HTTP API - use this to integrate AgentOS into
-#                   another app, script, or automation
+# One service, one URL: the React web UI and the HTTP API are served
+# from the same FastAPI process (the UI is a static build mounted at
+# "/", the API lives at /health, /agents, /run, /execute, /auth/*) - no
+# separate frontend service or CORS setup needed for the bundled deploy.
 #
 # Required secret (set in the Render dashboard when prompted):
 #   OPENAI_API_KEY   — works with ANY OpenAI-compatible provider's key,
@@ -20,11 +19,15 @@
 #   TAVILY_API_KEY (better web search), SMTP_* (real email sending)
 #
 # NOTE: on the free plan storage is ephemeral — memory (SQLite) resets on
-# each deploy/restart, and is not shared between the two services. Upgrade
-# the plan and attach a disk at /data for persistence.
+# each deploy/restart. Upgrade the plan and attach a disk at /data for
+# persistence.
 
-envVarGroups:
-  - name: agentos-secrets
+services:
+  - type: web
+    name: agentos
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
     envVars:
       - key: OPENAI_API_KEY
         sync: false          # prompted securely in the dashboard, never in git
@@ -34,27 +37,5 @@ envVarGroups:
         sync: false
       - key: AGENTOS_MODEL
         value: gpt-4o-mini    # e.g. llama-3.3-70b-versatile for Groq
-
-services:
-  - type: web
-    name: agentos-ui
-    runtime: docker
-    plan: free
-    dockerCommand: >
-      streamlit run app.py --server.port 8000 --server.address 0.0.0.0
-      --server.headless true
-    healthCheckPath: /_stcore/health
-    envVars:
-      - fromGroup: agentos-secrets
-      - key: AGENTOS_UI_PASSWORD
-        sync: false   # set this before making the UI public - see README
-
-  - type: web
-    name: agentos-api
-    runtime: docker
-    plan: free
-    healthCheckPath: /health
-    envVars:
-      - fromGroup: agentos-secrets
       - key: AGENTOS_RATE_LIMIT_PER_MIN
         value: "10"

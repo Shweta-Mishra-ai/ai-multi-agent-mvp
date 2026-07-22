@@ -4,9 +4,11 @@
     python cli.py chat                 # interactive session with memory
     python cli.py agents               # list registered agents and tools
     python cli.py history              # recent sessions
-    python cli.py ui                   # launch the Streamlit frontend
+    python cli.py serve                # HTTP API + web UI (if built)
+    python cli.py ui                   # React frontend in dev mode (hot reload)
 """
 
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -194,8 +196,15 @@ def history(limit: int = typer.Option(10, help="How many sessions to show")):
 
 @app.command()
 def ui():
-    """Launch the Streamlit web frontend."""
-    subprocess.run([sys.executable, "-m", "streamlit", "run", "app.py"])
+    """Launch the React frontend in dev mode (hot reload) against a
+    locally running `cli.py serve` on :8000. For production, the
+    frontend is already served BY `cli.py serve` - build it first with
+    `cd frontend && npm run build`, no separate process needed."""
+    frontend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend")
+    if not os.path.isdir(os.path.join(frontend_dir, "node_modules")):
+        console.print("[dim]Installing frontend dependencies (first run only)...[/dim]")
+        subprocess.run(["npm", "install"], cwd=frontend_dir, check=True)
+    subprocess.run(["npm", "run", "dev"], cwd=frontend_dir)
 
 
 @app.command()
@@ -203,7 +212,9 @@ def serve(
     host: str = typer.Option("0.0.0.0", help="Bind address"),
     port: int = typer.Option(8000, help="Port"),
 ):
-    """Launch the HTTP API (FastAPI/uvicorn) for programmatic access."""
+    """Launch the HTTP API - and the web UI too, if frontend/dist has
+    been built (`cd frontend && npm run build`), served from the same
+    origin at '/'."""
     import uvicorn
 
     uvicorn.run("api:app", host=host, port=port)
