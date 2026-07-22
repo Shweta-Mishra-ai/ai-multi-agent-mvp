@@ -1,9 +1,36 @@
+import hmac
+import os
+
 import streamlit as st
 
 from agentos.kernel import Kernel
 from agentos.registry import all_specs
 
 st.set_page_config(page_title="AgentOS", layout="centered")
+
+
+def _passcode_gate():
+    """If AGENTOS_UI_PASSWORD is set, require it before anything else
+    renders. Without this, the UI recommended for public deployment
+    (unlike the API, which requires a key once one exists) would let
+    anyone with the URL burn the operator's LLM budget with no gate at
+    all. Left unset, the UI stays open - matching prior behavior for
+    personal/local use."""
+    required = os.getenv("AGENTOS_UI_PASSWORD")
+    if not required or st.session_state.get("ui_authed"):
+        return
+    st.title("🔒 AgentOS")
+    entered = st.text_input("Password", type="password")
+    if st.button("Enter"):
+        if hmac.compare_digest(entered, required):
+            st.session_state.ui_authed = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    st.stop()
+
+
+_passcode_gate()
 
 st.title("🧠 AgentOS")
 st.caption("Multi-agent orchestration: plan → agents → tools → verify. "

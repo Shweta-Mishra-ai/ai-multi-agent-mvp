@@ -46,6 +46,8 @@ services:
     healthCheckPath: /_stcore/health
     envVars:
       - fromGroup: agentos-secrets
+      - key: AGENTOS_UI_PASSWORD
+        sync: false   # set this before making the UI public - see README
 
   - type: web
     name: agentos-api

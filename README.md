@@ -87,8 +87,13 @@ controllable from the **CLI** or a **web UI**, both running on the same core.
 - **Live evals** — a golden routing test set (`evals/`) measures planner
   accuracy against the real LLM; run locally or via the manual `Evals`
   GitHub Actions workflow
-- **Health & diagnostics** — `/health` endpoint for load balancers and
-  `python cli.py doctor` to validate a deployment's configuration
+- **Health & diagnostics** — `/health` endpoint for load balancers,
+  `python cli.py doctor` to validate a deployment's configuration, and
+  `python scripts/smoke_test.py <url>` to verify a live deployment
+  actually works right after deploying (not just that it started)
+- **UI access control** — the Streamlit UI (which has no API-key concept
+  of its own) can require a shared passphrase via `AGENTOS_UI_PASSWORD`
+  before making it public
 - **Tested + CI** — pytest suite (kernel orchestration, parallelism, failure
   propagation, security guards, concurrent-load isolation, API) runs on
   every push via GitHub Actions, gated at 80% coverage (currently ~92%)
@@ -142,7 +147,8 @@ curl -X POST localhost:8000/execute \
 ```
 
 The API streams the exact same event protocol as the CLI and web UI, so any
-product can embed AgentOS.
+product can embed AgentOS. Interactive docs are auto-generated at `/docs`
+(Swagger UI) and `/openapi.json` on any running instance.
 
 ### 🔐 Authentication & per-user rate limits
 
@@ -193,6 +199,35 @@ and `AGENTOS_MODEL` in the group's dashboard settings after the first
 deploy. Each service takes a few minutes to build; Render gives each one
 its own URL when ready.
 
+**The two services are fully independent** - separate containers, separate
+databases. A session started on `agentos-ui` won't show up in
+`agentos-api`'s history (or vice versa), and an API key created for
+`agentos-api` doesn't apply to the UI. This is fine for how they're used
+today (the UI has no HTTP API auth concept - see below), but keep it in
+mind if you build automation that expects them to share state.
+
+**Protect the UI before making it public**: unlike the API (which locks
+down once you create a key), the Streamlit UI has no built-in gate - set
+`AGENTOS_UI_PASSWORD` in the `agentos-ui` service's environment to require
+a shared passphrase before anyone can use it and burn your LLM budget. In
+the free tier's shared/reused rate-limit bucket (open mode), this is your
+only protection for the UI.
+
+### ✅ Launch checklist
+
+1. `python cli.py doctor` locally - confirm `OPENAI_API_KEY` and provider
+   settings are right before deploying
+2. Deploy the Render blueprint (above)
+3. Set `AGENTOS_UI_PASSWORD` on `agentos-ui` if it'll be public
+4. Create at least one API key for `agentos-api` if it'll be public:
+   open the service's **Shell** tab on Render and run
+   `python cli.py keys create "some name"`
+5. Verify the live deployment actually works:
+   `python scripts/smoke_test.py https://your-api-url.onrender.com`
+   (add `--key ak_...` if you created one)
+6. Schedule `python cli.py prune` periodically (e.g. a weekly Render cron
+   job) so the database doesn't grow unbounded under daily use
+
 ### 🔑 Which keys go where
 
 | Where | Key | Required? | Purpose |
@@ -239,15 +274,19 @@ agentos/
   config.py        # every limit tunable via environment variables
   security.py      # input validation, per-key rate limiting, SSRF guard
   telemetry.py     # per-run metrics: tokens, tool calls, est. cost
+  identity.py      # ambient caller identity for multi-tenant isolation
   log.py           # structured logging
   agents/
     base.py        # generic tool-loop agent (arg validation, output caps)
     builtin.py     # task / research / email / code / writer
   tools/           # the "syscalls": web, files, mail, system, memory
+                   #   (workspace files & memory scoped per caller)
 cli.py             # Typer + Rich CLI (run, chat, agents, history, stats,
                    #   prune, keys create/list/revoke, doctor, serve, ui)
 api.py             # FastAPI HTTP API (NDJSON event stream)
 app.py             # Streamlit frontend over the same kernel
+scripts/
+  smoke_test.py    # post-deploy check: hits a live URL's /health, /agents, /run
 tests/             # pytest suite (mocked LLM) — runs in CI on every push
 ```
 
