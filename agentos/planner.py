@@ -1,6 +1,6 @@
 import json
 
-from agentos import config
+from agentos import config, monitoring
 from agentos.llm import chat
 from agentos.log import get_logger
 from agentos.registry import all_specs
@@ -95,5 +95,6 @@ def make_plan(user_input, energy_level="Medium", history=None):
         # provider incompatibility, rate limits) degrades every request to
         # a single generic step with zero operational visibility into why.
         log.warning("planning failed, falling back to a single task step: %s", e)
+        monitoring.capture_exception(e)
 
     return [{"agent": "task", "instruction": user_input, "depends_on": []}]

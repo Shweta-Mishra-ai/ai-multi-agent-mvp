@@ -17,6 +17,10 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 
+from agentos import monitoring
+
+monitoring.init()
+
 app = typer.Typer(add_completion=False, help="AgentOS — multi-agent orchestration")
 console = Console()
 
@@ -243,15 +247,25 @@ def prune(days: int = typer.Option(30, help="Delete records older than this many
 
 
 @keys_app.command("create")
-def keys_create(name: str = typer.Argument(..., help="Label for who/what this key is for")):
+def keys_create(
+    name: str = typer.Argument(..., help="Label for who/what this key is for"),
+    no_execute: bool = typer.Option(
+        False, "--no-execute",
+        help="Restrict this key: it can call /run (research, drafts, "
+             "previews) but /execute always refuses it - use for a caller "
+             "who should never be able to actually send an email etc."),
+):
     """Create a new API key. Once any key exists, the HTTP API requires
     'Authorization: Bearer <key>' on /run and /execute, and this key gets
     its own rate-limit budget separate from every other caller."""
     from agentos.memory import default_memory
 
-    key_id, plaintext = default_memory.create_api_key(name)
+    key_id, plaintext = default_memory.create_api_key(name, can_execute=not no_execute)
+    scope_note = ("[yellow]restricted: cannot execute approved actions[/yellow]"
+                 if no_execute else "full access")
     console.print(Panel(
         f"[bold]{plaintext}[/bold]\n\n"
+        f"Scope: {scope_note}\n\n"
         "[yellow]This is shown only once - store it now.[/yellow] "
         "AgentOS keeps only a hash, so it cannot be shown again "
         "(create a new one if it's lost).",
@@ -269,13 +283,15 @@ def keys_list():
     table.add_column("Name")
     table.add_column("Created")
     table.add_column("Last used")
+    table.add_column("Scope")
     table.add_column("Status")
     for k in default_memory.list_api_keys():
         created = datetime.fromtimestamp(k["created_at"]).strftime("%d %b %H:%M")
         last_used = (datetime.fromtimestamp(k["last_used_at"]).strftime("%d %b %H:%M")
                     if k["last_used_at"] else "never")
+        scope = "full" if k["can_execute"] else "[yellow]restricted[/yellow]"
         status = "[red]revoked[/red]" if k["revoked_at"] else "[green]active[/green]"
-        table.add_row(k["id"], k["name"], created, last_used, status)
+        table.add_row(k["id"], k["name"], created, last_used, scope, status)
     console.print(table)
 
 
@@ -342,6 +358,20 @@ def doctor():
                 "'cli.py keys create <name>' before a public deployment")
     except Exception as e:
         row("API auth", False, str(e))
+    row("Monitoring", monitoring.is_enabled(),
+        "Sentry enabled" if monitoring.is_enabled()
+        else "not configured (optional) — set SENTRY_DSN to enable")
+    from agentos import oauth
+
+    row("Google sign-in", oauth.is_configured(),
+        "configured" if oauth.is_configured()
+        else "not configured (optional) — see README's OAuth section")
+    if oauth.is_configured() and not os.getenv("GOOGLE_REDIRECT_URI"):
+        row("Google sign-in", False,
+            "GOOGLE_CLIENT_ID is set but GOOGLE_REDIRECT_URI is missing")
+    row("Semantic recall", True,
+        f"embedding model: {os.getenv('AGENTOS_EMBEDDING_MODEL', 'text-embedding-3-small')} "
+        "(falls back to substring search if the provider doesn't support it)")
     console.print(table)
 
 

@@ -8,6 +8,8 @@ import sqlite3
 import time
 import uuid
 
+from agentos.embeddings import cosine_similarity, embed
+
 DB_PATH = os.getenv("AGENTOS_DB", "agentos.db")
 
 _MISSING = object()  # sentinel: "no session with this id", distinct from
@@ -26,7 +28,9 @@ CREATE TABLE IF NOT EXISTS api_keys (
     key_hash TEXT UNIQUE,
     created_at REAL,
     revoked_at REAL,
-    last_used_at REAL
+    last_used_at REAL,
+    can_execute INTEGER DEFAULT 1,
+    google_email TEXT
 );
 CREATE TABLE IF NOT EXISTS messages (
     session_id TEXT,
@@ -43,7 +47,8 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,
     value TEXT,
-    updated_at REAL
+    updated_at REAL,
+    embedding TEXT
 );
 CREATE TABLE IF NOT EXISTS metrics (
     session_id TEXT,
@@ -78,6 +83,20 @@ class Memory:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
         if "api_key_id" not in cols:
             conn.execute("ALTER TABLE sessions ADD COLUMN api_key_id TEXT")
+
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(api_keys)")}
+        if "can_execute" not in cols:
+            # Default existing keys to full access (1) - a pre-existing key
+            # must not silently lose the ability to execute approved
+            # actions just because this column was introduced later.
+            conn.execute(
+                "ALTER TABLE api_keys ADD COLUMN can_execute INTEGER DEFAULT 1")
+        if "google_email" not in cols:
+            conn.execute("ALTER TABLE api_keys ADD COLUMN google_email TEXT")
+
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(kv)")}
+        if "embedding" not in cols:
+            conn.execute("ALTER TABLE kv ADD COLUMN embedding TEXT")
 
     @contextlib.contextmanager
     def _conn(self):
@@ -182,38 +201,48 @@ class Memory:
 
     # --- API key management (identity for per-caller rate limiting) ---
 
-    def create_api_key(self, name):
+    def create_api_key(self, name, can_execute=True):
         """Create a new API key. Returns (key_id, plaintext_key) - the
         plaintext is only ever available at creation time; only its hash
-        is stored, so a leaked database backup does not leak usable keys."""
+        is stored, so a leaked database backup does not leak usable keys.
+
+        can_execute=False creates a restricted key that can call /run
+        (plan, research, draft, preview irreversible actions) but is
+        always refused at /execute - useful for giving a key to a caller
+        who should never be able to actually send an email, for example,
+        even if they can request one be drafted."""
         key_id = uuid.uuid4().hex[:12]
         plaintext = "ak_" + secrets.token_urlsafe(32)
         key_hash = hashlib.sha256(plaintext.encode()).hexdigest()
         with self._conn() as conn:
             conn.execute(
-                "INSERT INTO api_keys VALUES (?, ?, ?, ?, NULL, NULL)",
-                (key_id, name[:80], key_hash, time.time()),
+                "INSERT INTO api_keys "
+                "(id, name, key_hash, created_at, can_execute) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (key_id, name[:80], key_hash, time.time(), int(can_execute)),
             )
         return key_id, plaintext
 
     def verify_api_key(self, plaintext):
-        """Return {"id", "name"} for a valid, non-revoked key, else None.
-        Uses a constant-time comparison so response timing can't be used
-        to brute-force a key one character at a time."""
+        """Return {"id", "name", "can_execute"} for a valid, non-revoked
+        key, else None. Uses a constant-time comparison so response timing
+        can't be used to brute-force a key one character at a time."""
         if not plaintext:
             return None
         key_hash = hashlib.sha256(plaintext.encode()).hexdigest()
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT id, name, key_hash FROM api_keys WHERE revoked_at IS NULL"
+                "SELECT id, name, key_hash, can_execute FROM api_keys "
+                "WHERE revoked_at IS NULL"
             ).fetchall()
-            for key_id, name, stored_hash in rows:
+            for key_id, name, stored_hash, can_execute in rows:
                 if hmac.compare_digest(stored_hash, key_hash):
                     conn.execute(
                         "UPDATE api_keys SET last_used_at = ? WHERE id = ?",
                         (time.time(), key_id),
                     )
-                    return {"id": key_id, "name": name}
+                    return {"id": key_id, "name": name,
+                            "can_execute": bool(can_execute)}
         return None
 
     def revoke_api_key(self, key_id):
@@ -224,15 +253,38 @@ class Memory:
             ).rowcount
         return changed > 0
 
+    def upsert_google_key(self, email):
+        """Issue a fresh API key for a Google account signing in, revoking
+        any previous key tied to the same email first. A login always
+        yields exactly one currently-valid key per account - we cannot
+        show the same plaintext twice, since (like every other key) only
+        its hash is ever stored, so "reuse the old key" isn't possible;
+        the previous one is simply retired in favor of a new one."""
+        with self._conn() as conn:
+            old_ids = [row[0] for row in conn.execute(
+                "SELECT id FROM api_keys WHERE google_email = ? AND revoked_at IS NULL",
+                (email,))]
+            for old_id in old_ids:
+                conn.execute(
+                    "UPDATE api_keys SET revoked_at = ? WHERE id = ?",
+                    (time.time(), old_id))
+
+        key_id, plaintext = self.create_api_key(email, can_execute=True)
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE api_keys SET google_email = ? WHERE id = ?", (email, key_id))
+        return key_id, plaintext
+
     def list_api_keys(self):
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT id, name, created_at, revoked_at, last_used_at "
+                "SELECT id, name, created_at, revoked_at, last_used_at, can_execute "
                 "FROM api_keys ORDER BY created_at DESC"
             ).fetchall()
         return [
-            {"id": i, "name": n, "created_at": c, "revoked_at": r, "last_used_at": u}
-            for i, n, c, r, u in rows
+            {"id": i, "name": n, "created_at": c, "revoked_at": r,
+             "last_used_at": u, "can_execute": bool(x)}
+            for i, n, c, r, u, x in rows
         ]
 
     def any_api_keys_exist(self):
@@ -254,13 +306,23 @@ class Memory:
         Stored as a "scope::key" composite rather than changing the kv
         table's schema (avoids a risky primary-key migration); the prefix
         is transparent to callers - remember/recall always deal in the
-        plain key the caller gave."""
+        plain key the caller gave.
+
+        Also best-effort computes and stores a semantic embedding of the
+        value, so recall() can later find it even without any literal
+        substring overlap with the search query. A no-op when the
+        provider doesn't support embeddings (e.g. Groq) - the fact is
+        still saved and still findable via substring search."""
+        embedding = embed(value)
+        embedding_json = json.dumps(embedding) if embedding else None
         with self._conn() as conn:
             scoped_key = f"{scope}::{key}"
             conn.execute(
-                "INSERT INTO kv VALUES (?, ?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = ?",
-                (scoped_key, value, time.time(), value, time.time()),
+                "INSERT INTO kv (key, value, updated_at, embedding) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET "
+                "value = ?, updated_at = ?, embedding = ?",
+                (scoped_key, value, time.time(), embedding_json,
+                 value, time.time(), embedding_json),
             )
 
     def recall(self, query="", scope="default"):
@@ -268,17 +330,37 @@ class Memory:
         with self._conn() as conn:
             if query:
                 rows = conn.execute(
-                    "SELECT key, value FROM kv WHERE key LIKE ? AND "
+                    "SELECT key, value, embedding FROM kv WHERE key LIKE ? AND "
                     "(key LIKE ? OR value LIKE ?) ORDER BY updated_at DESC LIMIT 20",
                     (f"{prefix}%", f"%{query}%", f"%{query}%"),
                 ).fetchall()
+                substring_keys = {k for k, _, _ in rows}
+
+                # Semantic match: surfaces a fact even with no literal
+                # substring overlap (e.g. query "leadership style" finding
+                # a fact worded "prefers collaborative decisions"). A
+                # no-op - same rows as above - if this provider doesn't
+                # support embeddings.
+                query_embedding = embed(query)
+                if query_embedding:
+                    embedded_rows = conn.execute(
+                        "SELECT key, value, embedding FROM kv WHERE key LIKE ? "
+                        "AND embedding IS NOT NULL", (f"{prefix}%",),
+                    ).fetchall()
+                    scored = sorted((
+                        (cosine_similarity(query_embedding, json.loads(e)), k, v)
+                        for k, v, e in embedded_rows
+                    ), key=lambda t: -t[0])
+                    for score, k, v in scored[:20]:
+                        if score >= 0.3 and k not in substring_keys:
+                            rows.append((k, v, None))
             else:
                 rows = conn.execute(
-                    "SELECT key, value FROM kv WHERE key LIKE ? "
+                    "SELECT key, value, embedding FROM kv WHERE key LIKE ? "
                     "ORDER BY updated_at DESC LIMIT 20",
                     (f"{prefix}%",),
                 ).fetchall()
-            result = {k[len(prefix):]: v for k, v in rows}
+            result = {k[len(prefix):]: v for k, v, _ in rows}
 
             # Backward compatibility: facts saved before per-caller scoping
             # existed have no "scope::" prefix at all. Surface them for the

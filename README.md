@@ -58,12 +58,19 @@ controllable from the **CLI** or a **web UI**, both running on the same core.
   request-size limits protect latency and cost
 - **Security** — API key authentication with **per-key rate limiting**
   (each caller gets an independent budget instead of sharing one global
-  bucket), keys stored only as a salted hash with constant-time
-  verification (a leaked DB backup can't be used to impersonate a key),
-  SSRF guard with per-redirect-hop re-validation and a response size cap
-  (agents cannot fetch internal/private network addresses, including via
-  a redirect chain), tool-argument schema validation, path-traversal-safe
+  bucket) and **per-key scopes** (a `--no-execute` restricted key can
+  preview irreversible actions but never actually execute them), keys
+  stored only as a salted hash with constant-time verification (a leaked
+  DB backup can't be used to impersonate a key), SSRF guard with
+  per-redirect-hop re-validation and a response size cap (agents cannot
+  fetch internal/private network addresses, including via a redirect
+  chain), tool-argument schema validation, path-traversal-safe
   workspace, safe (AST-based) calculator, secrets only via environment
+- **Optional "Sign in with Google"** — users can self-serve an API key at
+  `/auth/google/login` instead of an operator manually creating one for
+  everybody; see the OAuth section below (**requires setup only the
+  operator can do**, and its full round trip is untested against
+  Google's real servers - see the honesty note there)
 - **Multi-tenant isolation** — workspace files and long-term memory are
   scoped per caller (their API key, or a shared "default" scope in
   open-mode/local use), and a caller can never resume a conversation
@@ -96,9 +103,19 @@ controllable from the **CLI** or a **web UI**, both running on the same core.
   before making it public
 - **Tested + CI** — pytest suite (kernel orchestration, parallelism, failure
   propagation, security guards, concurrent-load isolation, API) runs on
-  every push via GitHub Actions, gated at 80% coverage (currently ~92%)
+  every push via GitHub Actions, gated at 80% coverage (currently ~92%,
+  104+ tests)
 - **Data retention** — `python cli.py prune` deletes old events/messages/
   metrics so the database doesn't grow unbounded under daily use
+- **Semantic memory (optional)** — `remember`/`recall` compute an
+  embedding for each saved fact when the configured provider supports it,
+  so `recall` can find a fact even with no literal wording overlap with
+  the search query; falls back to plain substring search automatically
+  (and fast - it gives up after one failed attempt per process, not on
+  every call) for providers without an embeddings endpoint (e.g. Groq)
+- **Optional error monitoring** — set `SENTRY_DSN` to send unhandled and
+  notable handled exceptions (planner failures, step crashes, storage
+  errors) to Sentry; a true no-op with zero overhead when unset
 
 ---
 
@@ -116,6 +133,7 @@ python cli.py history       # recent sessions from persistent memory
 python cli.py stats         # aggregated run metrics (tokens, cost, duration)
 python cli.py prune         # delete old records (e.g. a weekly cron)
 python cli.py keys create "some user"   # issue an API key (see Security below)
+python cli.py keys create "intern" --no-execute  # restricted: can preview, never execute
 python cli.py keys list     # list keys (never shows the secret again)
 python cli.py keys revoke <id>          # revoke a key immediately
 python cli.py doctor        # validate the deployment configuration
@@ -241,6 +259,33 @@ only protection for the UI.
 Never commit keys to git — `.env` is gitignored and `render.yaml` marks
 secrets `sync: false`.
 
+### 🔐 Optional: "Sign in with Google"
+
+Lets a user self-serve an API key at `GET /auth/google/login` instead of
+an operator running `cli.py keys create` for every person. **This needs
+real setup only the deployment operator can do, and has NOT been tested
+against Google's real servers in development** (there's no real Google
+OAuth Client ID or public HTTPS callback URL available there) - the
+request/response handling (CSRF state, token exchange, error paths) is
+covered by tests using mocked HTTP responses, but treat the live flow as
+unverified until you've tried it yourself.
+
+Setup:
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials),
+   create an **OAuth 2.0 Client ID** (application type: Web application).
+2. Add an **authorized redirect URI**: `https://<your-api-domain>/auth/google/callback`
+3. Set three env vars on the `agentos-api` service: `GOOGLE_CLIENT_ID`,
+   `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` (the exact URL from
+   step 2 - it's required explicitly rather than auto-detected, since a
+   reverse proxy like Render's can make requests appear to arrive over
+   `http://` even though the public URL is `https://`).
+4. Visit `https://<your-api-domain>/auth/google/login` - after signing
+   in, the page shows a freshly issued API key (shown once). Logging in
+   again issues a new key and revokes the previous one for that account.
+
+Leave `GOOGLE_CLIENT_ID` unset and these routes 404 - the API behaves
+exactly as if this feature didn't exist.
+
 ---
 
 ## ➕ Adding a new agent (one registration call)
@@ -275,6 +320,9 @@ agentos/
   security.py      # input validation, per-key rate limiting, SSRF guard
   telemetry.py     # per-run metrics: tokens, tool calls, est. cost
   identity.py      # ambient caller identity for multi-tenant isolation
+  embeddings.py    # optional semantic embeddings for long-term memory
+  monitoring.py    # optional Sentry error monitoring (no-op if unset)
+  oauth.py         # optional "Sign in with Google" login flow
   log.py           # structured logging
   agents/
     base.py        # generic tool-loop agent (arg validation, output caps)

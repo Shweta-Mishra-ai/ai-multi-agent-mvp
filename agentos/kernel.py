@@ -4,7 +4,7 @@ import time
 import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from agentos import config, identity, security, telemetry
+from agentos import config, identity, monitoring, security, telemetry
 from agentos.llm import chat
 from agentos.log import get_logger
 from agentos.memory import default_memory
@@ -83,6 +83,7 @@ class Kernel:
             except Exception as e:
                 result = f"Tool error: {e}"
                 log.warning("approved action %s failed: %s", action.get("tool"), e)
+                monitoring.capture_exception(e)
             results.append({**action, "result": result})
         return results
 
@@ -123,6 +124,7 @@ class Kernel:
             # degrade to a fresh in-memory-only session (no history) rather
             # than letting the generator raise mid-stream.
             log.warning("memory unavailable, continuing without history: %s", e)
+            monitoring.capture_exception(e)
             session_id = session_id or uuid.uuid4().hex[:12]
             history = []
 
@@ -166,6 +168,7 @@ class Kernel:
             self.memory.add_message(session_id, "assistant", final)
         except Exception as e:
             log.warning("could not persist messages: %s", e)
+            monitoring.capture_exception(e)
 
         yield emit({"type": "done", "output": final, "session_id": session_id})
 
@@ -174,6 +177,7 @@ class Kernel:
             self.memory.save_metrics(session_id, snapshot)
         except Exception as e:
             log.warning("could not persist metrics: %s", e)
+            monitoring.capture_exception(e)
         yield emit({"type": "metrics", **snapshot})
 
     # --- execution ---
@@ -235,6 +239,7 @@ class Kernel:
                         statuses[i] = "failed"
                         log.warning("step %s (%s) failed: %s",
                                     i + 1, steps[i]["agent"], e)
+                        monitoring.capture_exception(e)
                     yield self._result_event(i, steps, outputs, statuses)
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
@@ -261,6 +266,7 @@ class Kernel:
                 {"agent": steps[last]["agent"], "instruction": instruction}, context)
         except Exception as e:
             log.warning("revision failed, keeping previous output: %s", e)
+            monitoring.capture_exception(e)
         yield {"type": "step_result", "index": last,
                "agent": steps[last]["agent"],
                "output": outputs.get(last, ""), "status": "ok"}
@@ -309,4 +315,5 @@ class Kernel:
             return json.loads(response.choices[0].message.content)
         except Exception as e:
             log.warning("verifier unavailable: %s", e)
+            monitoring.capture_exception(e)
             return {"satisfied": True, "feedback": f"(verifier unavailable: {e})"}

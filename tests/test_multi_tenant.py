@@ -47,7 +47,8 @@ def test_legacy_unscoped_memory_stays_visible_in_default_scope(tmp_path):
     mem = Memory(db_path=str(tmp_path / "t.db"))
     with mem._conn() as conn:
         conn.execute(
-            "INSERT INTO kv VALUES ('old_fact', 'still here', 0)")
+            "INSERT INTO kv (key, value, updated_at) "
+            "VALUES ('old_fact', 'still here', 0)")
 
     assert mem.recall(scope="default") == {"old_fact": "still here"}
     assert mem.recall(scope="key-a") == {}  # legacy facts are not "key-a"'s

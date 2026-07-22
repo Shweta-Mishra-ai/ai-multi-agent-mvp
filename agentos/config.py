@@ -38,3 +38,14 @@ RATE_LIMIT_PER_MIN = _int("AGENTOS_RATE_LIMIT_PER_MIN", 10)
 # of every request separately paying the full retry+timeout cost
 CIRCUIT_FAILURE_THRESHOLD = _int("AGENTOS_CIRCUIT_FAILURE_THRESHOLD", 5)
 CIRCUIT_RESET_SECONDS = _int("AGENTOS_CIRCUIT_RESET_SECONDS", 30)
+
+# Semantic recall: not every OpenAI-compatible provider has an embeddings
+# endpoint (e.g. Groq's chat-only API doesn't) - recall() falls back to
+# substring search automatically when embeddings are unavailable.
+EMBEDDING_MODEL = os.getenv("AGENTOS_EMBEDDING_MODEL", "text-embedding-3-small")
+
+# Optional "Sign in with Google" (see agentos/oauth.py). Set explicitly
+# rather than auto-derived from the request, since a reverse proxy (e.g.
+# Render terminates TLS in front of the container) can make the request
+# appear to arrive over http:// even though the public URL is https://.
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")

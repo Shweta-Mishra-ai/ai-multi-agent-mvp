@@ -12,7 +12,7 @@ def test_create_verify_and_revoke_key(tmp_path):
 
     assert plaintext.startswith("ak_")
     identity = mem.verify_api_key(plaintext)
-    assert identity == {"id": key_id, "name": "alice"}
+    assert identity == {"id": key_id, "name": "alice", "can_execute": True}
 
     assert mem.verify_api_key("ak_totally-wrong-key") is None
     assert mem.verify_api_key("") is None
