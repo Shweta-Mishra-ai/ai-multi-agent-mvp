@@ -10,6 +10,9 @@ import uuid
 
 DB_PATH = os.getenv("AGENTOS_DB", "agentos.db")
 
+_MISSING = object()  # sentinel: "no session with this id", distinct from
+                     # "session exists and is unowned/open-mode" (None)
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
@@ -102,6 +105,17 @@ class Memory:
                 (session_id, time.time(), title[:80], api_key_id),
             )
         return session_id
+
+    def get_session_owner(self, session_id):
+        """The api_key_id a session was created under (None for
+        open-mode/anonymous), or _MISSING if the session doesn't exist -
+        distinct from None so a caller can't "resume" a nonexistent id
+        into someone else's future session of the same identity."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT api_key_id FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        return row[0] if row else _MISSING
 
     def add_message(self, session_id, role, content):
         with self._conn() as conn:
@@ -235,27 +249,57 @@ class Memory:
 
     # --- long-term key-value memory (used by agents via tools) ---
 
-    def remember(self, key, value):
+    def remember(self, key, value, scope="default"):
+        """Scoped per caller so different callers' facts never collide.
+        Stored as a "scope::key" composite rather than changing the kv
+        table's schema (avoids a risky primary-key migration); the prefix
+        is transparent to callers - remember/recall always deal in the
+        plain key the caller gave."""
         with self._conn() as conn:
+            scoped_key = f"{scope}::{key}"
             conn.execute(
                 "INSERT INTO kv VALUES (?, ?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = ?",
-                (key, value, time.time(), value, time.time()),
+                (scoped_key, value, time.time(), value, time.time()),
             )
 
-    def recall(self, query=""):
+    def recall(self, query="", scope="default"):
+        prefix = f"{scope}::"
         with self._conn() as conn:
             if query:
                 rows = conn.execute(
-                    "SELECT key, value FROM kv WHERE key LIKE ? OR value LIKE ? "
-                    "ORDER BY updated_at DESC LIMIT 20",
-                    (f"%{query}%", f"%{query}%"),
+                    "SELECT key, value FROM kv WHERE key LIKE ? AND "
+                    "(key LIKE ? OR value LIKE ?) ORDER BY updated_at DESC LIMIT 20",
+                    (f"{prefix}%", f"%{query}%", f"%{query}%"),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT key, value FROM kv ORDER BY updated_at DESC LIMIT 20"
+                    "SELECT key, value FROM kv WHERE key LIKE ? "
+                    "ORDER BY updated_at DESC LIMIT 20",
+                    (f"{prefix}%",),
                 ).fetchall()
-        return dict(rows)
+            result = {k[len(prefix):]: v for k, v in rows}
+
+            # Backward compatibility: facts saved before per-caller scoping
+            # existed have no "scope::" prefix at all. Surface them for the
+            # default/open-mode scope only, so an existing single-user
+            # deployment doesn't lose access to what it already remembered.
+            if scope == "default":
+                legacy_filter = "key NOT LIKE '%::%'"
+                if query:
+                    legacy = conn.execute(
+                        f"SELECT key, value FROM kv WHERE {legacy_filter} AND "
+                        "(key LIKE ? OR value LIKE ?) ORDER BY updated_at DESC LIMIT 20",
+                        (f"%{query}%", f"%{query}%"),
+                    ).fetchall()
+                else:
+                    legacy = conn.execute(
+                        f"SELECT key, value FROM kv WHERE {legacy_filter} "
+                        "ORDER BY updated_at DESC LIMIT 20"
+                    ).fetchall()
+                for k, v in legacy:
+                    result.setdefault(k, v)
+        return result
 
     # --- retention ---
 

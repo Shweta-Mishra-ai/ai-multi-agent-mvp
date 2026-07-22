@@ -115,7 +115,7 @@ def execute(body: ExecuteRequest, api_key_id: Optional[str] = Depends(get_api_ke
     regenerate its output, which is non-deterministic and could execute
     something different from what the caller reviewed and approved."""
     try:
-        return Kernel().execute_approved(body.actions)
+        return Kernel().execute_approved(body.actions, api_key_id=api_key_id)
     except Exception as e:
         log.exception("unhandled error executing approved actions")
         return JSONResponse(status_code=500, content={"message": f"Internal error: {e}"})

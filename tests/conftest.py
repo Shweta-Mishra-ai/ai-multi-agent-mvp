@@ -34,6 +34,18 @@ def make_plan_json(steps):
     return json.dumps({"steps": steps})
 
 
+@pytest.fixture(autouse=True)
+def _reset_caller_identity():
+    """Guarantee agentos.identity's ambient caller contextvar never leaks
+    between tests, even if a test fails partway through before reaching
+    its own cleanup (a manual identity.set_caller(None) at the end of a
+    test body would not run if an assertion above it raises)."""
+    from agentos import identity
+
+    yield
+    identity.set_caller(None)
+
+
 @pytest.fixture
 def patch_llm(monkeypatch):
     """Patch the LLM everywhere it's imported; pass a callable chat stub."""

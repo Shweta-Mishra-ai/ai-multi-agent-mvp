@@ -4,7 +4,7 @@ import time
 import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from agentos import config, security, telemetry
+from agentos import config, identity, security, telemetry
 from agentos.llm import chat
 from agentos.log import get_logger
 from agentos.memory import default_memory
@@ -55,7 +55,7 @@ class Kernel:
     def __init__(self, memory=None):
         self.memory = memory or default_memory
 
-    def execute_approved(self, actions):
+    def execute_approved(self, actions, api_key_id=None):
         """Directly execute previously-previewed tool calls with their exact
         recorded arguments - no re-planning and no re-running any agent.
 
@@ -63,9 +63,14 @@ class Kernel:
         the user reviewed: re-running the whole kernel would ask the LLM to
         regenerate its output, which is non-deterministic and could send a
         different email than the one that was previewed, as well as costing
-        a second full round of LLM calls just to reach the approval gate."""
+        a second full round of LLM calls just to reach the approval gate.
+
+        api_key_id must be set here too (not just in run()) so a tool that
+        touches per-caller storage (workspace files, long-term memory)
+        still lands in the correct caller's scope on this path."""
         from agentos.tools import TOOLS
 
+        identity.set_caller(api_key_id)
         results = []
         for action in actions:
             entry = TOOLS.get(action.get("tool"))
@@ -85,6 +90,10 @@ class Kernel:
             approve=False, api_key_id=None):
         metrics = telemetry.start_run()
         metrics.approved = bool(approve)
+        identity.set_caller(api_key_id)  # scopes workspace files & long-term
+                                          # memory to this caller; propagates
+                                          # into parallel step worker threads
+                                          # via contextvars.copy_context()
 
         problem = security.validate_request(user_input)
         if problem:
@@ -96,6 +105,16 @@ class Kernel:
             return
 
         try:
+            if session_id is not None:
+                # A caller must not be able to resume - and read the
+                # conversation history of - a session that belongs to a
+                # different caller, whether by guessing an id or a bug
+                # upstream forwarding the wrong one.
+                owner = self.memory.get_session_owner(session_id)
+                if owner != api_key_id:
+                    log.warning("ignoring session_id owned by a different "
+                                "caller (isolation guard)")
+                    session_id = None
             if session_id is None:
                 session_id = self.memory.create_session(user_input, api_key_id)
             history = self.memory.get_messages(session_id, limit=8)

@@ -64,6 +64,10 @@ controllable from the **CLI** or a **web UI**, both running on the same core.
   (agents cannot fetch internal/private network addresses, including via
   a redirect chain), tool-argument schema validation, path-traversal-safe
   workspace, safe (AST-based) calculator, secrets only via environment
+- **Multi-tenant isolation** — workspace files and long-term memory are
+  scoped per caller (their API key, or a shared "default" scope in
+  open-mode/local use), and a caller can never resume a conversation
+  session that belongs to a different caller, even by guessing its id
 - **Circuit breaker** — after repeated consecutive LLM failures (a
   provider outage), calls fail instantly with a clear message for a
   cooldown period instead of every request separately paying the full
@@ -87,7 +91,7 @@ controllable from the **CLI** or a **web UI**, both running on the same core.
   `python cli.py doctor` to validate a deployment's configuration
 - **Tested + CI** — pytest suite (kernel orchestration, parallelism, failure
   propagation, security guards, concurrent-load isolation, API) runs on
-  every push via GitHub Actions, gated at 80% coverage (currently ~89%)
+  every push via GitHub Actions, gated at 80% coverage (currently ~92%)
 - **Data retention** — `python cli.py prune` deletes old events/messages/
   metrics so the database doesn't grow unbounded under daily use
 
@@ -281,6 +285,7 @@ says so explicitly.
 
 - OAuth / SSO in addition to API keys, and per-key scopes (e.g. read-only,
   no-approval-gate-bypass)
+- Per-tenant quotas beyond rate limiting (e.g. workspace disk quotas)
 - Scheduled / recurring runs
 - Vector memory for semantic recall
 - Postgres backend option for horizontal scaling
