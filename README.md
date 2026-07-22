@@ -56,11 +56,19 @@ controllable from the **CLI** or a **web UI**, both running on the same core.
   steps are explicitly skipped and the user gets a clear partial-result report
 - **Budgets** — hard per-run deadline, max steps, max tool turns, and
   request-size limits protect latency and cost
-- **Security** — input validation, per-deployment rate limiting, SSRF guard
-  with per-redirect-hop re-validation and a response size cap (agents
-  cannot fetch internal/private network addresses, including via a
-  redirect chain), tool-argument schema validation, path-traversal-safe
+- **Security** — API key authentication with **per-key rate limiting**
+  (each caller gets an independent budget instead of sharing one global
+  bucket), keys stored only as a salted hash with constant-time
+  verification (a leaked DB backup can't be used to impersonate a key),
+  SSRF guard with per-redirect-hop re-validation and a response size cap
+  (agents cannot fetch internal/private network addresses, including via
+  a redirect chain), tool-argument schema validation, path-traversal-safe
   workspace, safe (AST-based) calculator, secrets only via environment
+- **Circuit breaker** — after repeated consecutive LLM failures (a
+  provider outage), calls fail instantly with a clear message for a
+  cooldown period instead of every request separately paying the full
+  retry-and-timeout cost, which would otherwise pile up and tie up every
+  worker thread during an outage
 - **Observability** — structured logging, and per-run metrics (duration,
   LLM calls, tool calls, tokens, estimated cost) persisted and aggregated
   via `python cli.py stats`
@@ -98,6 +106,9 @@ python cli.py agents        # list registered agents and their tools
 python cli.py history       # recent sessions from persistent memory
 python cli.py stats         # aggregated run metrics (tokens, cost, duration)
 python cli.py prune         # delete old records (e.g. a weekly cron)
+python cli.py keys create "some user"   # issue an API key (see Security below)
+python cli.py keys list     # list keys (never shows the secret again)
+python cli.py keys revoke <id>          # revoke a key immediately
 python cli.py doctor        # validate the deployment configuration
 python cli.py serve         # HTTP API (FastAPI) on :8000
 python cli.py ui            # launch the Streamlit web frontend
@@ -128,6 +139,37 @@ curl -X POST localhost:8000/execute \
 
 The API streams the exact same event protocol as the CLI and web UI, so any
 product can embed AgentOS.
+
+### 🔐 Authentication & per-user rate limits
+
+Fresh installs run **open mode**: `/run` and `/execute` work with no
+`Authorization` header, sharing one global rate-limit budget — fine for
+solo/local use. The moment you create your first API key, the API
+**permanently** requires a key on every `/run`/`/execute` call (even if
+that key is later revoked — revoking is for rotating out a compromised
+key, not for reopening the API to the public).
+
+```bash
+python cli.py keys create "acme-corp"     # shown ONCE - store it now
+# → ak_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+curl -X POST localhost:8000/run \
+     -H 'content-type: application/json' \
+     -H 'Authorization: Bearer ak_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX' \
+     -d '{"request": "..."}'
+```
+
+Give each real user/team their own key (`cli.py keys create "their name"`)
+so **one key's traffic never exhausts another's budget** — the opposite of
+a single shared bucket, where one very active user could starve everyone
+else. Keys are stored as a salted hash (never in plaintext) with
+constant-time comparison; `cli.py keys list` shows metadata only, never
+the secret itself. `/health` and `/agents` never require a key.
+
+On Render, manage keys via the **Shell** tab on the `agentos-api`
+service (`python cli.py keys create "..."`) since there's no key-creation
+HTTP endpoint by design — exposing key creation over the network would
+let anyone mint their own key.
 
 ### Deploying to Render (one click)
 
@@ -186,17 +228,20 @@ agentos/
   kernel.py        # orchestrator: validate → plan → parallel execute → verify
   planner.py       # LLM planner (structured output, learns agents from registry)
   registry.py      # AgentSpec registration & discovery
-  memory.py        # SQLite (WAL): sessions, messages, events, metrics, kv memory
-  llm.py           # provider-agnostic LLM client (timeouts + retries)
+  memory.py        # SQLite (WAL): sessions, messages, events, metrics,
+                   #   kv memory, API keys (hashed) - schema auto-migrates
+  llm.py           # provider-agnostic LLM client (timeouts, retries, circuit breaker)
+  circuit_breaker.py  # fails fast during a sustained LLM provider outage
   config.py        # every limit tunable via environment variables
-  security.py      # input validation, rate limiting, SSRF guard
+  security.py      # input validation, per-key rate limiting, SSRF guard
   telemetry.py     # per-run metrics: tokens, tool calls, est. cost
   log.py           # structured logging
   agents/
     base.py        # generic tool-loop agent (arg validation, output caps)
     builtin.py     # task / research / email / code / writer
   tools/           # the "syscalls": web, files, mail, system, memory
-cli.py             # Typer + Rich CLI (run, chat, agents, history, stats, doctor, serve, ui)
+cli.py             # Typer + Rich CLI (run, chat, agents, history, stats,
+                   #   prune, keys create/list/revoke, doctor, serve, ui)
 api.py             # FastAPI HTTP API (NDJSON event stream)
 app.py             # Streamlit frontend over the same kernel
 tests/             # pytest suite (mocked LLM) — runs in CI on every push
@@ -234,10 +279,8 @@ says so explicitly.
 
 ## 🔮 Roadmap
 
-- API authentication (keys/OAuth) + multi-tenant isolation — needed for
-  **per-caller** rate limiting; today's rate limit is a single global
-  bucket shared by every caller on a deployment, since there's no identity
-  concept yet
+- OAuth / SSO in addition to API keys, and per-key scopes (e.g. read-only,
+  no-approval-gate-bypass)
 - Scheduled / recurring runs
 - Vector memory for semantic recall
 - Postgres backend option for horizontal scaling

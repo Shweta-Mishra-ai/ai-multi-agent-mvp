@@ -1,6 +1,9 @@
 import contextlib
+import hashlib
+import hmac
 import json
 import os
+import secrets
 import sqlite3
 import time
 import uuid
@@ -11,7 +14,16 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     created_at REAL,
-    title TEXT
+    title TEXT,
+    api_key_id TEXT
+);
+CREATE TABLE IF NOT EXISTS api_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    key_hash TEXT UNIQUE,
+    created_at REAL,
+    revoked_at REAL,
+    last_used_at REAL
 );
 CREATE TABLE IF NOT EXISTS messages (
     session_id TEXT,
@@ -52,6 +64,17 @@ class Memory:
         with self._conn() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn):
+        # CREATE TABLE IF NOT EXISTS does not add columns to a table that
+        # already exists (e.g. a live deployment's DB from before this
+        # column existed) - without this, every INSERT into sessions would
+        # fail on any database created before api_key_id was introduced.
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+        if "api_key_id" not in cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN api_key_id TEXT")
 
     @contextlib.contextmanager
     def _conn(self):
@@ -71,12 +94,12 @@ class Memory:
 
     # --- sessions & conversation ---
 
-    def create_session(self, title):
+    def create_session(self, title, api_key_id=None):
         session_id = uuid.uuid4().hex[:12]
         with self._conn() as conn:
             conn.execute(
-                "INSERT INTO sessions VALUES (?, ?, ?)",
-                (session_id, time.time(), title[:80]),
+                "INSERT INTO sessions VALUES (?, ?, ?, ?)",
+                (session_id, time.time(), title[:80], api_key_id),
             )
         return session_id
 
@@ -130,13 +153,85 @@ class Memory:
             ).fetchall()
         return [json.loads(r[0]) for r in rows]
 
-    def runs_in_last_minute(self):
+    def runs_in_last_minute(self, api_key_id=None):
+        """Count runs in the last 60s, scoped to a single caller's identity
+        (api_key_id) so each API key gets its own budget instead of every
+        caller sharing one global bucket. api_key_id=None scopes to
+        unauthenticated/local callers as a single shared bucket."""
         with self._conn() as conn:
             (count,) = conn.execute(
-                "SELECT COUNT(*) FROM events WHERE type = 'plan' AND ts > ?",
-                (time.time() - 60,),
+                "SELECT COUNT(*) FROM sessions WHERE created_at > ? AND "
+                "api_key_id IS ?",
+                (time.time() - 60, api_key_id),
             ).fetchone()
         return count
+
+    # --- API key management (identity for per-caller rate limiting) ---
+
+    def create_api_key(self, name):
+        """Create a new API key. Returns (key_id, plaintext_key) - the
+        plaintext is only ever available at creation time; only its hash
+        is stored, so a leaked database backup does not leak usable keys."""
+        key_id = uuid.uuid4().hex[:12]
+        plaintext = "ak_" + secrets.token_urlsafe(32)
+        key_hash = hashlib.sha256(plaintext.encode()).hexdigest()
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO api_keys VALUES (?, ?, ?, ?, NULL, NULL)",
+                (key_id, name[:80], key_hash, time.time()),
+            )
+        return key_id, plaintext
+
+    def verify_api_key(self, plaintext):
+        """Return {"id", "name"} for a valid, non-revoked key, else None.
+        Uses a constant-time comparison so response timing can't be used
+        to brute-force a key one character at a time."""
+        if not plaintext:
+            return None
+        key_hash = hashlib.sha256(plaintext.encode()).hexdigest()
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, name, key_hash FROM api_keys WHERE revoked_at IS NULL"
+            ).fetchall()
+            for key_id, name, stored_hash in rows:
+                if hmac.compare_digest(stored_hash, key_hash):
+                    conn.execute(
+                        "UPDATE api_keys SET last_used_at = ? WHERE id = ?",
+                        (time.time(), key_id),
+                    )
+                    return {"id": key_id, "name": name}
+        return None
+
+    def revoke_api_key(self, key_id):
+        with self._conn() as conn:
+            changed = conn.execute(
+                "UPDATE api_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+                (time.time(), key_id),
+            ).rowcount
+        return changed > 0
+
+    def list_api_keys(self):
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, name, created_at, revoked_at, last_used_at "
+                "FROM api_keys ORDER BY created_at DESC"
+            ).fetchall()
+        return [
+            {"id": i, "name": n, "created_at": c, "revoked_at": r, "last_used_at": u}
+            for i, n, c, r, u in rows
+        ]
+
+    def any_api_keys_exist(self):
+        """Whether auth has ever been opted into - deliberately counts ALL
+        keys, not just active ones. If this only counted active keys,
+        revoking your only key (e.g. mid-rotation: revoke old, about to
+        create new) would open a window where the API silently falls back
+        to unauthenticated open mode - the opposite of what revoking a key
+        implies. Once any key has ever been created, auth stays required;
+        a revoked key still correctly fails verification."""
+        with self._conn() as conn:
+            (count,) = conn.execute("SELECT COUNT(*) FROM api_keys").fetchone()
+        return count > 0
 
     # --- long-term key-value memory (used by agents via tools) ---
 

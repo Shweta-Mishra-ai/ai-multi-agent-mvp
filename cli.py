@@ -20,6 +20,9 @@ from rich.table import Table
 app = typer.Typer(add_completion=False, help="AgentOS — multi-agent orchestration")
 console = Console()
 
+keys_app = typer.Typer(add_completion=False, help="Manage API keys for the HTTP API")
+app.add_typer(keys_app, name="keys")
+
 
 def _render_events(events):
     final = None
@@ -239,6 +242,54 @@ def prune(days: int = typer.Option(30, help="Delete records older than this many
     console.print(table)
 
 
+@keys_app.command("create")
+def keys_create(name: str = typer.Argument(..., help="Label for who/what this key is for")):
+    """Create a new API key. Once any key exists, the HTTP API requires
+    'Authorization: Bearer <key>' on /run and /execute, and this key gets
+    its own rate-limit budget separate from every other caller."""
+    from agentos.memory import default_memory
+
+    key_id, plaintext = default_memory.create_api_key(name)
+    console.print(Panel(
+        f"[bold]{plaintext}[/bold]\n\n"
+        "[yellow]This is shown only once - store it now.[/yellow] "
+        "AgentOS keeps only a hash, so it cannot be shown again "
+        "(create a new one if it's lost).",
+        title=f"API key created (id: {key_id})", border_style="green",
+    ))
+
+
+@keys_app.command("list")
+def keys_list():
+    """List API keys (never shows the key value itself, only metadata)."""
+    from agentos.memory import default_memory
+
+    table = Table(title="API keys")
+    table.add_column("ID", style="cyan")
+    table.add_column("Name")
+    table.add_column("Created")
+    table.add_column("Last used")
+    table.add_column("Status")
+    for k in default_memory.list_api_keys():
+        created = datetime.fromtimestamp(k["created_at"]).strftime("%d %b %H:%M")
+        last_used = (datetime.fromtimestamp(k["last_used_at"]).strftime("%d %b %H:%M")
+                    if k["last_used_at"] else "never")
+        status = "[red]revoked[/red]" if k["revoked_at"] else "[green]active[/green]"
+        table.add_row(k["id"], k["name"], created, last_used, status)
+    console.print(table)
+
+
+@keys_app.command("revoke")
+def keys_revoke(key_id: str = typer.Argument(..., help="Key ID from 'keys list'")):
+    """Revoke an API key immediately."""
+    from agentos.memory import default_memory
+
+    if default_memory.revoke_api_key(key_id):
+        console.print(f"[green]Revoked key {key_id}.[/green]")
+    else:
+        console.print(f"[red]No active key with id {key_id}.[/red]")
+
+
 @app.command()
 def doctor():
     """Check the deployment configuration and report problems."""
@@ -280,6 +331,17 @@ def doctor():
         "Tavily" if os.getenv("TAVILY_API_KEY") else "DuckDuckGo fallback")
     row("Email sending", True,
         "SMTP configured" if os.getenv("SMTP_HOST") else "draft-only mode (no SMTP)")
+    try:
+        from agentos.memory import default_memory
+
+        if default_memory.any_api_keys_exist():
+            row("API auth", True, "enabled — /run and /execute require a key")
+        else:
+            row("API auth", False,
+                "open mode — anyone with the URL can call the API; run "
+                "'cli.py keys create <name>' before a public deployment")
+    except Exception as e:
+        row("API auth", False, str(e))
     console.print(table)
 
 

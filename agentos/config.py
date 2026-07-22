@@ -33,3 +33,8 @@ MAX_FILE_BYTES = _int("AGENTOS_MAX_FILE_BYTES", 200_000)
 
 # Abuse protection
 RATE_LIMIT_PER_MIN = _int("AGENTOS_RATE_LIMIT_PER_MIN", 10)
+
+# Circuit breaker: fail fast during a sustained LLM provider outage instead
+# of every request separately paying the full retry+timeout cost
+CIRCUIT_FAILURE_THRESHOLD = _int("AGENTOS_CIRCUIT_FAILURE_THRESHOLD", 5)
+CIRCUIT_RESET_SECONDS = _int("AGENTOS_CIRCUIT_RESET_SECONDS", 30)

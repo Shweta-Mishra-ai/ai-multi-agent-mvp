@@ -7,13 +7,20 @@
     POST /run       -> run a request; streams NDJSON events as they happen
     POST /execute   -> execute action(s) previously returned in an
                        approval_required event, exactly as previewed
+
+Authentication: create API keys with `python cli.py keys create <name>`.
+Once at least one (non-revoked) key exists, /run and /execute require
+'Authorization: Bearer <key>' and each key gets its own rate-limit budget.
+Before any key is ever created, the API runs unauthenticated ("open
+mode") sharing a single global budget - fine for solo/local use, but a
+public deployment should create keys for real users.
 """
 
 import json
 import logging
 from typing import Any, Optional
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -21,6 +28,7 @@ import agentos
 import agentos.agents  # noqa: F401  (registers built-in agents)
 from agentos import config
 from agentos.kernel import Kernel
+from agentos.memory import default_memory
 from agentos.registry import all_specs
 
 log = logging.getLogger("agentos.api")
@@ -30,6 +38,24 @@ app = FastAPI(
     version=agentos.__version__,
     description="Multi-agent orchestration: plan → agents → tools → verify.",
 )
+
+
+def get_api_key_id(authorization: Optional[str] = Header(None)) -> Optional[str]:
+    """FastAPI dependency: resolves the caller's identity for rate limiting
+    and enforces auth once at least one API key has been created."""
+    if not default_memory.any_api_keys_exist():
+        return None  # open mode: nobody has set up keys yet
+
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="This deployment requires an API key: pass "
+                   "'Authorization: Bearer <key>'.",
+        )
+    identity = default_memory.verify_api_key(authorization[len("Bearer "):].strip())
+    if identity is None:
+        raise HTTPException(status_code=401, detail="Invalid or revoked API key.")
+    return identity["id"]
 
 
 class ExecuteRequest(BaseModel):
@@ -61,12 +87,13 @@ def agents():
 
 
 @app.post("/run")
-def run(body: RunRequest):
+def run(body: RunRequest, api_key_id: Optional[str] = Depends(get_api_key_id)):
     def stream():
         try:
             for event in Kernel().run(body.request, body.energy,
                                       session_id=body.session_id,
-                                      approve=body.approve):
+                                      approve=body.approve,
+                                      api_key_id=api_key_id):
                 yield json.dumps(event, default=str) + "\n"
         except Exception as e:
             # Without this, an unexpected error mid-stream would truncate
@@ -80,7 +107,7 @@ def run(body: RunRequest):
 
 
 @app.post("/execute")
-def execute(body: ExecuteRequest):
+def execute(body: ExecuteRequest, api_key_id: Optional[str] = Depends(get_api_key_id)):
     """Execute action(s) previously returned in a /run approval_required
     event, using their exact recorded arguments. This never re-runs the
     plan or any agent, so the action executed is guaranteed to match

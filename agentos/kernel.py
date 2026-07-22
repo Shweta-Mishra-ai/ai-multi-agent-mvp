@@ -82,7 +82,7 @@ class Kernel:
         return results
 
     def run(self, user_input, energy_level="Medium", session_id=None,
-            approve=False):
+            approve=False, api_key_id=None):
         metrics = telemetry.start_run()
         metrics.approved = bool(approve)
 
@@ -90,14 +90,14 @@ class Kernel:
         if problem:
             yield {"type": "error", "message": problem}
             return
-        if not security.check_rate_limit(self.memory):
+        if not security.check_rate_limit(self.memory, api_key_id):
             yield {"type": "error",
                    "message": "Rate limit reached — please wait a minute and try again."}
             return
 
         try:
             if session_id is None:
-                session_id = self.memory.create_session(user_input)
+                session_id = self.memory.create_session(user_input, api_key_id)
             history = self.memory.get_messages(session_id, limit=8)
         except Exception as e:
             # A transient storage error here must not crash the whole run:
