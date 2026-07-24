@@ -2,29 +2,109 @@
 
     python cli.py serve            # or: uvicorn api:app --host 0.0.0.0
 
-    GET  /health   -> liveness probe for load balancers / orchestrators
-    GET  /agents   -> registered agents and their tools
-    POST /run      -> run a request; streams NDJSON events as they happen
+    GET  /health    -> liveness probe for load balancers / orchestrators
+    GET  /agents    -> registered agents and their tools
+    POST /run       -> run a request; streams NDJSON events as they happen
+    POST /execute   -> execute action(s) previously returned in an
+                       approval_required event, exactly as previewed
+    GET  /auth/google/login, /auth/google/callback -> optional "Sign in
+                       with Google" issuing an API key automatically
+
+Authentication: create API keys with `python cli.py keys create <name>`,
+or (if configured) let users self-serve one via GET /auth/google/login.
+Once at least one (non-revoked) key exists, /run and /execute require
+'Authorization: Bearer <key>' and each key gets its own rate-limit budget.
+Before any key is ever created, the API runs unauthenticated ("open
+mode") sharing a single global budget - fine for solo/local use, but a
+public deployment should create keys for real users.
 """
 
+import html
 import json
-from typing import Optional
+import logging
+import os
+from pathlib import Path
+from typing import Any, Optional
 
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import agentos
 import agentos.agents  # noqa: F401  (registers built-in agents)
-from agentos import config
+from agentos import config, monitoring, oauth
 from agentos.kernel import Kernel
+from agentos.memory import default_memory
 from agentos.registry import all_specs
+
+log = logging.getLogger("agentos.api")
+monitoring.init()
 
 app = FastAPI(
     title="AgentOS API",
     version=agentos.__version__,
     description="Multi-agent orchestration: plan → agents → tools → verify.",
 )
+
+# AgentOS is designed to be embeddable in other products (see README), so
+# CORS is open by default; restrict it by setting a comma-separated
+# AGENTOS_CORS_ORIGINS if this API should only ever be called from one
+# specific frontend origin.
+_cors_origins = os.getenv("AGENTOS_CORS_ORIGINS", "*")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"] if _cors_origins == "*" else _cors_origins.split(","),
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def _resolve_identity(authorization: Optional[str]):
+    """Returns None in open mode (no keys ever created), or the verified
+    identity dict {"id", "name", "can_execute"}. Raises 401 for a missing/
+    invalid/revoked key once at least one key exists."""
+    if not default_memory.any_api_keys_exist():
+        return None  # open mode: nobody has set up keys yet
+
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="This deployment requires an API key: pass "
+                   "'Authorization: Bearer <key>'.",
+        )
+    identity = default_memory.verify_api_key(authorization[len("Bearer "):].strip())
+    if identity is None:
+        raise HTTPException(status_code=401, detail="Invalid or revoked API key.")
+    return identity
+
+
+def get_api_key_id(authorization: Optional[str] = Header(None)) -> Optional[str]:
+    """FastAPI dependency for /run: resolves the caller's identity for
+    rate limiting and enforces auth once at least one API key exists."""
+    identity = _resolve_identity(authorization)
+    return identity["id"] if identity else None
+
+
+def get_executable_api_key_id(authorization: Optional[str] = Header(None)) -> Optional[str]:
+    """FastAPI dependency for /execute: same as get_api_key_id, but also
+    enforces the key's can_execute scope - a restricted key (created with
+    `keys create <name> --no-execute`) can preview irreversible actions
+    via /run but is never allowed to actually execute them."""
+    identity = _resolve_identity(authorization)
+    if identity and not identity["can_execute"]:
+        raise HTTPException(
+            status_code=403,
+            detail="This API key is restricted to preview-only access and "
+                   "cannot execute approved actions.",
+        )
+    return identity["id"] if identity else None
+
+
+class ExecuteRequest(BaseModel):
+    actions: list[dict[str, Any]] = Field(min_length=1, max_length=20)
 
 
 class RunRequest(BaseModel):
@@ -52,11 +132,100 @@ def agents():
 
 
 @app.post("/run")
-def run(body: RunRequest):
+def run(body: RunRequest, api_key_id: Optional[str] = Depends(get_api_key_id)):
     def stream():
-        for event in Kernel().run(body.request, body.energy,
-                                  session_id=body.session_id,
-                                  approve=body.approve):
-            yield json.dumps(event, default=str) + "\n"
+        try:
+            for event in Kernel().run(body.request, body.energy,
+                                      session_id=body.session_id,
+                                      approve=body.approve,
+                                      api_key_id=api_key_id):
+                yield json.dumps(event, default=str) + "\n"
+        except Exception as e:
+            # Without this, an unexpected error mid-stream would truncate
+            # the NDJSON response with no terminal event, leaving the
+            # client to guess whether the run finished or died.
+            log.exception("unhandled error while streaming a run")
+            monitoring.capture_exception(e)
+            yield json.dumps({"type": "error", "message": f"Internal error: {e}"},
+                             default=str) + "\n"
 
     return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
+@app.post("/execute")
+def execute(body: ExecuteRequest,
+           api_key_id: Optional[str] = Depends(get_executable_api_key_id)):
+    """Execute action(s) previously returned in a /run approval_required
+    event, using their exact recorded arguments. This never re-runs the
+    plan or any agent, so the action executed is guaranteed to match
+    what was previewed - re-running a full plan would ask the LLM to
+    regenerate its output, which is non-deterministic and could execute
+    something different from what the caller reviewed and approved."""
+    try:
+        return Kernel().execute_approved(body.actions, api_key_id=api_key_id)
+    except Exception as e:
+        log.exception("unhandled error executing approved actions")
+        monitoring.capture_exception(e)
+        return JSONResponse(status_code=500, content={"message": f"Internal error: {e}"})
+
+
+@app.get("/auth/google/login")
+def google_login():
+    """Redirects to Google's consent screen. Requires GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI to be configured - see
+    the README's OAuth section for the Google Cloud Console setup this
+    depends on (which only the deployment operator can do)."""
+    if not oauth.is_configured():
+        raise HTTPException(
+            status_code=404,
+            detail="Google sign-in is not configured on this deployment.")
+    redirect_uri = config.GOOGLE_REDIRECT_URI
+    if not redirect_uri:
+        raise HTTPException(
+            status_code=500,
+            detail="GOOGLE_REDIRECT_URI is not set on this deployment.")
+    return RedirectResponse(oauth.build_authorize_url(redirect_uri))
+
+
+@app.get("/auth/google/callback")
+def google_callback(code: Optional[str] = None, state: Optional[str] = None,
+                    error: Optional[str] = None):
+    """Exchanges the authorization code for a verified email, then issues
+    (or reissues - see upsert_google_key) an API key for that account."""
+    if error:
+        raise HTTPException(status_code=400,
+                            detail=f"Google sign-in failed: {error}")
+    if not code or not state or not oauth.consume_state(state):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or expired sign-in attempt - please try again.")
+    try:
+        email = oauth.exchange_code_for_email(code, config.GOOGLE_REDIRECT_URI)
+    except Exception as e:
+        log.warning("Google OAuth exchange failed: %s", e)
+        monitoring.capture_exception(e)
+        raise HTTPException(status_code=502, detail="Could not verify Google sign-in.")
+
+    key_id, plaintext = default_memory.upsert_google_key(email)
+    safe_email = html.escape(email)
+    safe_key = html.escape(plaintext)
+    return HTMLResponse(f"""
+        <h2>Signed in as {safe_email}</h2>
+        <p>Your API key (shown once — copy it now, it can't be shown again):</p>
+        <pre style="background:#eee;padding:1em;word-wrap:break-word;">{safe_key}</pre>
+        <p>Use it as a header: <code>Authorization: Bearer {safe_key}</code></p>
+    """)
+
+
+# Serve the built React frontend (frontend/dist) at "/", if present. This
+# is mounted LAST so it never shadows the API routes above (Starlette
+# matches routes in registration order) - and only if the build actually
+# exists, so running the API without ever building the frontend (e.g.
+# the test suite, or local API-only development) still works rather than
+# raising at import time.
+_frontend_dist = Path(__file__).parent / "frontend" / "dist"
+if _frontend_dist.is_dir():
+    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
+else:
+    log.info("frontend/dist not found - serving API only (run "
+             "`npm run build` in frontend/ to enable the web UI)")

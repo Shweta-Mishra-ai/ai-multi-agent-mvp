@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+/* No @custom-variant override here: Tailwind v4's `dark:` variant
+   defaults to `prefers-color-scheme: dark`, which is exactly what this
+   app wants since it has no manual theme toggle - it follows the
+   OS/browser setting automatically. */
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

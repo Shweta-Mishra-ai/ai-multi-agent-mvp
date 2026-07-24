@@ -6,3 +6,5 @@ agentos.db*
 workspace/
 tests/
 .github/
+frontend/node_modules
+frontend/dist

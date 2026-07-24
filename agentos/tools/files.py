@@ -1,11 +1,15 @@
 import os
 
-from agentos import config
+from agentos import config, identity
 from agentos.tools import tool
 
 
 def _workspace():
-    return os.getenv("AGENTOS_WORKSPACE", "workspace")
+    # Scoped per caller (API key, or "default" in open-mode/local use) so
+    # different callers' files never collide or become visible to each
+    # other - each gets their own subdirectory automatically.
+    base = os.getenv("AGENTOS_WORKSPACE", "workspace")
+    return os.path.join(base, identity.scope())
 
 
 def _safe_path(name):
@@ -18,7 +22,7 @@ def _safe_path(name):
     return path
 
 
-@tool("List all files in the shared workspace.")
+@tool("List all files in your workspace.")
 def list_files():
     workspace = _workspace()
     os.makedirs(workspace, exist_ok=True)
