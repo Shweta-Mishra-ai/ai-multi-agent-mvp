@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from agentos import config, telemetry
+from agentos import circuit_breaker, config, telemetry
 
 load_dotenv()
 
@@ -21,11 +21,18 @@ MODEL = os.getenv("AGENTOS_MODEL", "gpt-4o-mini")
 
 
 def chat(messages, tools=None, response_format=None):
+    circuit_breaker.breaker.before_call()  # raises CircuitOpenError if open
+
     kwargs = {"model": MODEL, "messages": messages}
     if tools:
         kwargs["tools"] = tools
     if response_format:
         kwargs["response_format"] = response_format
-    response = client.chat.completions.create(**kwargs)
+    try:
+        response = client.chat.completions.create(**kwargs)
+    except Exception:
+        circuit_breaker.breaker.record_failure()
+        raise
+    circuit_breaker.breaker.record_success()
     telemetry.record_llm(response)
     return response

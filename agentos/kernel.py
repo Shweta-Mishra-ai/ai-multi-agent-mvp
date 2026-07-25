@@ -1,9 +1,10 @@
 import contextvars
 import json
 import time
+import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from agentos import config, security, telemetry
+from agentos import config, identity, monitoring, security, telemetry
 from agentos.llm import chat
 from agentos.log import get_logger
 from agentos.memory import default_memory
@@ -54,23 +55,78 @@ class Kernel:
     def __init__(self, memory=None):
         self.memory = memory or default_memory
 
+    def execute_approved(self, actions, api_key_id=None):
+        """Directly execute previously-previewed tool calls with their exact
+        recorded arguments - no re-planning and no re-running any agent.
+
+        This guarantees the action actually executed is identical to the one
+        the user reviewed: re-running the whole kernel would ask the LLM to
+        regenerate its output, which is non-deterministic and could send a
+        different email than the one that was previewed, as well as costing
+        a second full round of LLM calls just to reach the approval gate.
+
+        api_key_id must be set here too (not just in run()) so a tool that
+        touches per-caller storage (workspace files, long-term memory)
+        still lands in the correct caller's scope on this path."""
+        from agentos.tools import TOOLS
+
+        identity.set_caller(api_key_id)
+        results = []
+        for action in actions:
+            entry = TOOLS.get(action.get("tool"))
+            if entry is None:
+                results.append({**action, "result": "Unknown tool"})
+                continue
+            try:
+                result = str(entry["fn"](**action.get("args", {})))[
+                    :config.MAX_TOOL_OUTPUT_CHARS]
+            except Exception as e:
+                result = f"Tool error: {e}"
+                log.warning("approved action %s failed: %s", action.get("tool"), e)
+                monitoring.capture_exception(e)
+            results.append({**action, "result": result})
+        return results
+
     def run(self, user_input, energy_level="Medium", session_id=None,
-            approve=False):
+            approve=False, api_key_id=None):
         metrics = telemetry.start_run()
         metrics.approved = bool(approve)
+        identity.set_caller(api_key_id)  # scopes workspace files & long-term
+                                          # memory to this caller; propagates
+                                          # into parallel step worker threads
+                                          # via contextvars.copy_context()
 
         problem = security.validate_request(user_input)
         if problem:
             yield {"type": "error", "message": problem}
             return
-        if not security.check_rate_limit(self.memory):
+        if not security.check_rate_limit(self.memory, api_key_id):
             yield {"type": "error",
                    "message": "Rate limit reached — please wait a minute and try again."}
             return
 
-        if session_id is None:
-            session_id = self.memory.create_session(user_input)
-        history = self.memory.get_messages(session_id, limit=8)
+        try:
+            if session_id is not None:
+                # A caller must not be able to resume - and read the
+                # conversation history of - a session that belongs to a
+                # different caller, whether by guessing an id or a bug
+                # upstream forwarding the wrong one.
+                owner = self.memory.get_session_owner(session_id)
+                if owner != api_key_id:
+                    log.warning("ignoring session_id owned by a different "
+                                "caller (isolation guard)")
+                    session_id = None
+            if session_id is None:
+                session_id = self.memory.create_session(user_input, api_key_id)
+            history = self.memory.get_messages(session_id, limit=8)
+        except Exception as e:
+            # A transient storage error here must not crash the whole run:
+            # degrade to a fresh in-memory-only session (no history) rather
+            # than letting the generator raise mid-stream.
+            log.warning("memory unavailable, continuing without history: %s", e)
+            monitoring.capture_exception(e)
+            session_id = session_id or uuid.uuid4().hex[:12]
+            history = []
 
         def emit(event):
             try:
@@ -112,6 +168,7 @@ class Kernel:
             self.memory.add_message(session_id, "assistant", final)
         except Exception as e:
             log.warning("could not persist messages: %s", e)
+            monitoring.capture_exception(e)
 
         yield emit({"type": "done", "output": final, "session_id": session_id})
 
@@ -120,6 +177,7 @@ class Kernel:
             self.memory.save_metrics(session_id, snapshot)
         except Exception as e:
             log.warning("could not persist metrics: %s", e)
+            monitoring.capture_exception(e)
         yield emit({"type": "metrics", **snapshot})
 
     # --- execution ---
@@ -181,6 +239,7 @@ class Kernel:
                         statuses[i] = "failed"
                         log.warning("step %s (%s) failed: %s",
                                     i + 1, steps[i]["agent"], e)
+                        monitoring.capture_exception(e)
                     yield self._result_event(i, steps, outputs, statuses)
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
@@ -207,6 +266,7 @@ class Kernel:
                 {"agent": steps[last]["agent"], "instruction": instruction}, context)
         except Exception as e:
             log.warning("revision failed, keeping previous output: %s", e)
+            monitoring.capture_exception(e)
         yield {"type": "step_result", "index": last,
                "agent": steps[last]["agent"],
                "output": outputs.get(last, ""), "status": "ok"}
@@ -255,4 +315,5 @@ class Kernel:
             return json.loads(response.choices[0].message.content)
         except Exception as e:
             log.warning("verifier unavailable: %s", e)
+            monitoring.capture_exception(e)
             return {"satisfied": True, "feedback": f"(verifier unavailable: {e})"}

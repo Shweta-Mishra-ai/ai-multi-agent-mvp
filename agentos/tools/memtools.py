@@ -1,3 +1,4 @@
+from agentos import identity
 from agentos.memory import default_memory
 from agentos.tools import tool
 
@@ -15,7 +16,9 @@ from agentos.tools import tool
     },
 )
 def remember(key, value):
-    default_memory.remember(key, value)
+    # Scoped per caller (API key, or "default" in open-mode/local use) so
+    # different callers' facts never collide or leak into each other.
+    default_memory.remember(key, value, scope=identity.scope())
     return f"Remembered '{key}'."
 
 
@@ -28,7 +31,7 @@ def remember(key, value):
     },
 )
 def recall(query=""):
-    facts = default_memory.recall(query)
+    facts = default_memory.recall(query, scope=identity.scope())
     if not facts:
         return "No matching facts in memory."
     return "\n".join(f"- {k}: {v}" for k, v in facts.items())

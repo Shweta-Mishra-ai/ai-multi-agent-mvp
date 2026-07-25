@@ -19,10 +19,17 @@ def validate_request(text):
     return None
 
 
-def check_rate_limit(memory):
-    """True if this deployment is under its runs-per-minute budget."""
+def check_rate_limit(memory, api_key_id=None):
+    """True if this caller is under its runs-per-minute budget.
+
+    Scoped per api_key_id when the caller authenticated with an API key,
+    so each key gets its own independent budget instead of every caller
+    sharing one global bucket. Unauthenticated/local callers (api_key_id
+    is None) share a single bucket - fine for personal/dev use, but a
+    public deployment should create API keys (see `cli.py keys create`)
+    so real users each get isolated limits."""
     try:
-        return memory.runs_in_last_minute() < config.RATE_LIMIT_PER_MIN
+        return memory.runs_in_last_minute(api_key_id) < config.RATE_LIMIT_PER_MIN
     except Exception:
         return True  # never block on a metrics failure
 

@@ -1,7 +1,11 @@
 import json
 
+from agentos import config, monitoring
 from agentos.llm import chat
+from agentos.log import get_logger
 from agentos.registry import all_specs
+
+log = get_logger("agentos.planner")
 
 PLAN_RESPONSE_FORMAT = {
     "type": "json_schema",
@@ -85,8 +89,12 @@ def make_plan(user_input, energy_level="Medium", history=None):
         steps = json.loads(response.choices[0].message.content)["steps"]
         steps = [s for s in steps if s["agent"] in valid_agents]
         if steps:
-            return steps[:5]
-    except Exception:
-        pass
+            return steps[:config.MAX_STEPS]
+    except Exception as e:
+        # Without this log line, a persistently failing planner (bad key,
+        # provider incompatibility, rate limits) degrades every request to
+        # a single generic step with zero operational visibility into why.
+        log.warning("planning failed, falling back to a single task step: %s", e)
+        monitoring.capture_exception(e)
 
     return [{"agent": "task", "instruction": user_input, "depends_on": []}]
