@@ -18,7 +18,13 @@ register(AgentSpec(
 Search the web for current information, fetch pages when you need details,
 and produce a concise, well-organized summary with key bullet points.
 Cite source URLs. If search is unavailable, answer from your knowledge and
-say clearly that the information may be outdated.""",
+say clearly that the information may be outdated.
+When asked to find leads, jobs, clients, or opportunities: search for and
+list the specific real ones your search results actually turned up (each
+with its source URL), not a general description of platforms where such
+things can be found. If your searches only return platform overviews and
+no specific listings, say that plainly instead of writing an article
+about the platforms.""",
     tools=["web_search", "fetch_url", "now"],
 ))
 
