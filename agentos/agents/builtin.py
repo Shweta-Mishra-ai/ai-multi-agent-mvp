@@ -19,13 +19,16 @@ Search the web for current information, fetch pages when you need details,
 and produce a concise, well-organized summary with key bullet points.
 Cite source URLs. If search is unavailable, answer from your knowledge and
 say clearly that the information may be outdated.
-When asked to find leads, jobs, clients, or opportunities: search for and
-list the specific real ones your search results actually turned up (each
-with its source URL), not a general description of platforms where such
-things can be found. If your searches only return platform overviews and
-no specific listings, say that plainly instead of writing an article
-about the platforms.""",
-    tools=["web_search", "fetch_url", "now"],
+When asked to find freelance work, gigs, or jobs to apply to: use
+find_freelance_jobs to pull real, current, open listings (title, company,
+apply link) - not a description of job platforms.
+When asked to find clients or companies to pitch to: use web_search with
+specific, targeted queries (e.g. companies publicly asking for a given
+skill) and report the specific real results found (each with its source
+URL) - not a general description of where such leads can be found. If a
+search only returns platform overviews and no specific results, say that
+plainly instead of writing an article about the platforms.""",
+    tools=["web_search", "fetch_url", "find_freelance_jobs", "now"],
 ))
 
 register(AgentSpec(
