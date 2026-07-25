@@ -1,4 +1,7 @@
 import json
+from types import SimpleNamespace
+
+from openai import BadRequestError
 
 from agentos import config, telemetry
 from agentos import tools as toolbox
@@ -34,7 +37,15 @@ class Agent:
         ]
 
         for _ in range(self.max_turns):
-            response = chat(messages, tools=self.tool_schemas or None)
+            try:
+                response = chat(messages, tools=self.tool_schemas or None)
+            except BadRequestError as e:
+                recovered = self._recover_hallucinated_tool_call(e)
+                if recovered is None:
+                    raise
+                messages.append(recovered["assistant_message"])
+                messages.append(recovered["tool_message"])
+                continue
             message = response.choices[0].message
 
             if not message.tool_calls:
@@ -73,6 +84,58 @@ class Agent:
             return str(fn(**args))[:config.MAX_TOOL_OUTPUT_CHARS]
         except Exception as e:
             return f"Tool error: {e}"
+
+    def _recover_hallucinated_tool_call(self, exc):
+        """Some models (observed with Groq's openai/gpt-oss-120b) occasionally
+        invent a plausible-but-wrong tool name (e.g. 'web_fetch' instead of
+        the registered 'fetch_url') despite the exact name being given in
+        the tools schema. The provider then rejects the whole request
+        server-side (400 tool_use_failed) before we ever see a tool_calls
+        message to correct - but it echoes the attempted call back in
+        `failed_generation`, which is enough to recover: if exactly one
+        registered tool's required arguments match what was attempted,
+        run that tool instead of failing the whole step."""
+        body = getattr(exc, "body", None)
+        if not isinstance(body, dict) or body.get("code") != "tool_use_failed":
+            return None
+        try:
+            attempted = json.loads(body.get("failed_generation") or "")
+            arguments = attempted["arguments"]
+            if not isinstance(arguments, dict):
+                return None
+        except (TypeError, ValueError, KeyError):
+            return None
+
+        matches = [
+            name for name, schema in self._schemas_by_name.items()
+            if set(schema.get("parameters", {}).get("required", [])) == set(arguments)
+        ]
+        if len(matches) != 1:
+            return None
+        resolved_name = matches[0]
+
+        call_id = f"recovered_{resolved_name}"
+        arguments_json = json.dumps(arguments)
+        call = SimpleNamespace(
+            id=call_id,
+            function=SimpleNamespace(name=resolved_name, arguments=arguments_json),
+        )
+        return {
+            "assistant_message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": resolved_name, "arguments": arguments_json},
+                }],
+            },
+            "tool_message": {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": self._execute_tool(call),
+            },
+        }
 
     def _validate_args(self, tool_name, args):
         params = self._schemas_by_name.get(tool_name, {}).get("parameters", {})
