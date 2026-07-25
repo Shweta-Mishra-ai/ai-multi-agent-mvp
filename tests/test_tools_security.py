@@ -66,3 +66,45 @@ def test_agent_validates_tool_arguments(patch_llm):
 
     result = get_agent("task").run("compute")
     assert "missing required argument" in result
+
+
+def test_agent_recovers_from_hallucinated_tool_name(patch_llm):
+    """Regression test for a real failure seen with Groq's
+    openai/gpt-oss-120b: the model calls a plausible-but-wrong tool name
+    (e.g. 'web_fetch' instead of the registered 'fetch_url') despite the
+    exact name being in the tools schema, and the provider rejects the
+    whole request server-side (400 tool_use_failed) before any tool_calls
+    message is ever returned. Since the attempted call is echoed back in
+    `failed_generation`, and its arguments unambiguously match exactly one
+    registered tool ('calculate' takes 'expression'; no other task-agent
+    tool does), the agent should run that tool instead of failing the step."""
+    import httpx
+    from openai import BadRequestError
+
+    request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+    response = httpx.Response(400, request=request)
+    hallucination = BadRequestError(
+        "Tool call validation failed",
+        response=response,
+        body={
+            "code": "tool_use_failed",
+            "failed_generation": json.dumps(
+                {"name": "compute_math", "arguments": {"expression": "2+2"}}),
+        },
+    )
+
+    state = {"calls": 0}
+
+    def fake_chat(messages, tools=None, response_format=None):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            raise hallucination
+        tool_messages = [m for m in messages if m.get("role") == "tool"]
+        assert tool_messages and tool_messages[-1]["content"] == "4"
+        return fake_response(content="done")
+
+    patch_llm(fake_chat)
+    from agentos.registry import get_agent
+    import agentos.agents  # noqa: F401
+
+    assert get_agent("task").run("what is 2+2") == "done"
