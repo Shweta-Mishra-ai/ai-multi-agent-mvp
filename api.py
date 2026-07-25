@@ -42,6 +42,18 @@ from agentos.registry import all_specs
 log = logging.getLogger("agentos.api")
 monitoring.init()
 
+# Where the built web UI lives. Overridable so a container can serve a
+# build from elsewhere (and so tests can point at an empty directory to
+# exercise the "no build present" path).
+_FRONTEND_DIST = Path(
+    os.getenv("AGENTOS_FRONTEND_DIST")
+    or Path(__file__).parent / "frontend" / "dist"
+)
+
+
+def _frontend_dist_exists():
+    return (_FRONTEND_DIST / "index.html").is_file()
+
 app = FastAPI(
     title="AgentOS API",
     version=agentos.__version__,
@@ -120,7 +132,17 @@ class RunRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": agentos.__version__}
+    """Liveness probe, and enough build detail to tell at a glance WHICH
+    code a deployment is actually running - a stale deploy otherwise
+    looks identical to a broken one from the outside."""
+    return {
+        "status": "ok",
+        "version": agentos.__version__,
+        # Render sets RENDER_GIT_COMMIT automatically; harmless elsewhere.
+        "commit": (os.getenv("RENDER_GIT_COMMIT") or os.getenv("GIT_COMMIT")
+                   or "unknown")[:12],
+        "web_ui_built": _frontend_dist_exists(),
+    }
 
 
 @app.get("/agents")
@@ -218,14 +240,50 @@ def google_callback(code: Optional[str] = None, state: Optional[str] = None,
 
 
 # Serve the built React frontend (frontend/dist) at "/", if present. This
-# is mounted LAST so it never shadows the API routes above (Starlette
+# is registered LAST so it never shadows the API routes above (Starlette
 # matches routes in registration order) - and only if the build actually
 # exists, so running the API without ever building the frontend (e.g.
 # the test suite, or local API-only development) still works rather than
 # raising at import time.
-_frontend_dist = Path(__file__).parent / "frontend" / "dist"
-if _frontend_dist.is_dir():
-    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
+if _frontend_dist_exists():
+    app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="frontend")
 else:
-    log.info("frontend/dist not found - serving API only (run "
-             "`npm run build` in frontend/ to enable the web UI)")
+    log.warning("frontend/dist not found - serving API only (run "
+                "`npm run build` in frontend/ to enable the web UI)")
+
+    @app.get("/", include_in_schema=False)
+    def missing_frontend():
+        """Explain the situation instead of returning a bare 404.
+
+        A plain `{"detail": "Not Found"}` here is indistinguishable from a
+        crashed app, a wrong URL, or a stale deployment - which is exactly
+        the confusion this page exists to prevent. It states what's
+        actually true: the API is healthy, the web UI just isn't in this
+        build."""
+        commit = (os.getenv("RENDER_GIT_COMMIT") or os.getenv("GIT_COMMIT")
+                  or "unknown")[:12]
+        return HTMLResponse(status_code=503, content=f"""
+            <html><head><title>AgentOS - web UI not built</title></head>
+            <body style="font-family:system-ui;max-width:40em;margin:4em auto;
+                         padding:0 1em;line-height:1.6;">
+            <h1>AgentOS API is running &mdash; the web UI isn't in this build</h1>
+            <p>The backend is healthy (try
+               <a href="/health">/health</a>,
+               <a href="/agents">/agents</a>, or
+               <a href="/docs">/docs</a>), but no
+               <code>frontend/dist</code> was found, so there's nothing to
+               serve here.</p>
+            <p>Running version <code>{html.escape(agentos.__version__)}</code>,
+               commit <code>{html.escape(commit)}</code>.</p>
+            <h2>Fix it</h2>
+            <ul>
+              <li><b>Deployed (Docker/Render):</b> the image's Node build
+                  stage didn't produce a build, or the running deploy
+                  predates the web UI. Redeploy the latest commit with
+                  the build cache cleared, and check the build log for
+                  <code>npm run build</code>.</li>
+              <li><b>Local:</b> run <code>cd frontend && npm install &&
+                  npm run build</code>, then restart the server.</li>
+            </ul>
+            </body></html>
+        """)

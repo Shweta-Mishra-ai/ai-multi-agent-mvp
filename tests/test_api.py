@@ -14,6 +14,46 @@ def test_health_and_agents():
     assert {a["name"] for a in agents} >= {"task", "research", "email", "code", "writer"}
 
 
+def test_health_reports_build_identity(monkeypatch):
+    """/health must expose which code is actually running - a stale
+    deployment is otherwise indistinguishable from a broken one, which
+    cost real debugging time on a live Render deploy."""
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "abc123def4567890")
+    from api import app
+
+    body = TestClient(app).get("/health").json()
+    assert body["version"]
+    assert body["commit"] == "abc123def456"  # truncated, not the full sha
+    assert isinstance(body["web_ui_built"], bool)
+
+
+def test_root_explains_itself_when_web_ui_not_built(tmp_path, monkeypatch):
+    """Regression test for a real deployment confusion: a bare
+    `{"detail": "Not Found"}` at / looked like a crashed app when in fact
+    the API was healthy and only the frontend build was missing.
+
+    Whether frontend/dist exists is decided at import time (it determines
+    whether a StaticFiles mount or the explanatory route gets registered),
+    so this points the module at an empty directory and reimports it -
+    reliably exercising the no-build path even in a checkout that HAS a
+    build."""
+    import importlib
+
+    import api
+
+    monkeypatch.setenv("AGENTOS_FRONTEND_DIST", str(tmp_path / "nonexistent-dist"))
+    importlib.reload(api)
+    try:
+        response = TestClient(api.app).get("/")
+        assert response.status_code == 503  # not a bare, unexplained 404
+        assert "API is running" in response.text
+        assert "/health" in response.text
+        assert "npm run build" in response.text
+    finally:
+        monkeypatch.delenv("AGENTOS_FRONTEND_DIST", raising=False)
+        importlib.reload(api)  # restore the real module state for other tests
+
+
 def test_run_streams_events(patch_llm):
     plan = make_plan_json(
         [{"agent": "task", "instruction": "plan it", "depends_on": []}])

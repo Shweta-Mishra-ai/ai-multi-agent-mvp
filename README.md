@@ -252,6 +252,27 @@ when ready — open it directly, that's the app.
 5. Schedule `python cli.py prune` periodically (e.g. a weekly Render cron
    job) so the database doesn't grow unbounded under daily use
 
+### 🩺 Troubleshooting a deployment
+
+**Start with `/health`** — it reports exactly what's running:
+
+```json
+{"status": "ok", "version": "1.0.0",
+ "commit": "baba1560e3f2", "web_ui_built": true}
+```
+
+| Symptom | What it means | Fix |
+|---|---|---|
+| `/health` shows an **old `version`/`commit`** | the deploy is **stale** — it's running older code than your branch's latest, which is the single most common cause of "my new feature isn't there" | redeploy the latest commit (on Render: **Manual Deploy → Clear build cache & deploy**), and confirm the service's configured **branch** is the one holding your work |
+| `web_ui_built: false`, and `/` shows an explanatory page | the API is healthy; the frontend build isn't in the image | check the build log for `npm ci` / `npm run build`; locally run `cd frontend && npm run build` |
+| `/` returns a bare `{"detail": "Not Found"}` | you're on a deploy from **before** the web UI existed (a version with no `/` route at all) | same as "stale deploy" above |
+| the whole domain is unreachable / 502 | container crashed or is still building | check the service's logs and deploy status; a free-tier instance also cold-starts (~30-50s) after inactivity |
+
+**Deploying the right branch matters.** If your work lives on a feature
+branch and the Render service is configured for `main` (the default),
+you'll be deploying code that doesn't contain it — merge the branch
+first, or change the service's branch setting to match.
+
 ### 🔑 Which keys go where
 
 | Where | Key | Required? | Purpose |
