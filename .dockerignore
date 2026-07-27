@@ -8,3 +8,6 @@ tests/
 .github/
 frontend/node_modules
 frontend/dist
+# Deploys as its own separate service (see browser-worker/README.md) -
+# not needed in the main app's image.
+browser-worker/
