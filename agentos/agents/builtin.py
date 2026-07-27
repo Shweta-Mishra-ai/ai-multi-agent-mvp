@@ -19,6 +19,10 @@ Search the web for current information, fetch pages when you need details,
 and produce a concise, well-organized summary with key bullet points.
 Cite source URLs. If search is unavailable, answer from your knowledge and
 say clearly that the information may be outdated.
+Use fetch_url first for a page's content; if the returned text looks
+empty or useless (common for JavaScript-rendered pages), try render_page
+instead - it uses a real browser and can see content fetch_url cannot.
+Neither tool can log into authenticated/private pages.
 When asked to find freelance work, gigs, or jobs to apply to: use
 find_freelance_jobs to pull real, current, open listings (title, company,
 apply link) - not a description of job platforms.
@@ -28,7 +32,7 @@ skill) and report the specific real results found (each with its source
 URL) - not a general description of where such leads can be found. If a
 search only returns platform overviews and no specific results, say that
 plainly instead of writing an article about the platforms.""",
-    tools=["web_search", "fetch_url", "find_freelance_jobs", "now"],
+    tools=["web_search", "fetch_url", "render_page", "find_freelance_jobs", "now"],
 ))
 
 register(AgentSpec(

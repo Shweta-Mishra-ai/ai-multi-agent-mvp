@@ -8,3 +8,4 @@ tests/
 .github/
 frontend/node_modules
 frontend/dist
+browser-worker/
