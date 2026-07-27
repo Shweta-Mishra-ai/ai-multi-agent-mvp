@@ -31,9 +31,9 @@ export function RunView({ state, onExecuted }: Props) {
   return (
     <div className="space-y-4">
       {state.plan.length > 0 && (
-        <div className="rounded-lg border border-gray-200 dark:border-gray-800 p-4">
+        <div className="rounded-xl border border-gray-200/80 dark:border-gray-800 bg-white/60 dark:bg-gray-900/40 p-4 shadow-sm">
           <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300">
-            <ListChecks className="h-4 w-4" />
+            <ListChecks className="h-4 w-4 text-indigo-500" />
             Plan
           </h3>
           <div className="space-y-2">
@@ -46,7 +46,7 @@ export function RunView({ state, onExecuted }: Props) {
 
       {state.verify && (
         <div
-          className={`rounded-lg border px-4 py-3 text-sm ${
+          className={`rounded-xl border px-4 py-3 text-sm shadow-sm ${
             state.verify.satisfied
               ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300'
               : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300'
@@ -67,7 +67,7 @@ export function RunView({ state, onExecuted }: Props) {
           {state.executeResults.map((r, i) => (
             <div
               key={i}
-              className="rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 p-3"
+              className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 p-3 shadow-sm"
             >
               <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
                 Executed: {r.tool}
@@ -81,14 +81,14 @@ export function RunView({ state, onExecuted }: Props) {
       )}
 
       {state.errorMessage && (
-        <div className="flex items-start gap-2 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+        <div className="flex items-start gap-2 rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm text-red-700 dark:text-red-300 shadow-sm">
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           {state.errorMessage}
         </div>
       )}
 
       {state.finalOutput != null && state.phase === 'done' && (
-        <div className="rounded-lg border border-gray-200 dark:border-gray-800 p-4">
+        <div className="rounded-xl border border-gray-200/80 dark:border-gray-800 bg-white/60 dark:bg-gray-900/40 p-4 shadow-sm">
           <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300">
             <CheckCircle2 className="h-4 w-4 text-emerald-500" />
             Result
