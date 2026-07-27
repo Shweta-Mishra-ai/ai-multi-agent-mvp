@@ -59,17 +59,23 @@ export default function App() {
   const running = state.phase === 'running'
 
   return (
-    <div className="flex h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-gray-950 dark:to-gray-900">
+    <div className="relative flex h-screen overflow-hidden bg-[#05060b] text-gray-100">
+      {/* Ambient glow field - purely decorative, sits behind everything */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden hud-grid">
+        <div className="animate-drift absolute -left-32 -top-32 h-[32rem] w-[32rem] rounded-full bg-cyan-500/20 blur-[120px]" />
+        <div className="animate-drift-slow absolute -bottom-40 right-0 h-[36rem] w-[36rem] rounded-full bg-violet-600/20 blur-[130px]" />
+      </div>
+
       <Sidebar agents={agents} healthy={healthy} onOpenSettings={() => setSettingsOpen(true)} />
 
-      <main className="flex-1 overflow-y-auto">
+      <main className="relative z-10 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-6 py-10">
           <header className="mb-6">
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
+            <h1 className="bg-gradient-to-r from-cyan-300 via-sky-200 to-violet-300 bg-clip-text text-2xl font-bold tracking-tight text-transparent">
               What do you want to do?
             </h1>
-            <p className="mt-1.5 text-sm text-gray-500 dark:text-gray-400">
-              Multi-agent orchestration: plan → agents → tools → verify.
+            <p className="mt-1.5 font-mono text-sm text-cyan-100/40">
+              &gt; multi-agent orchestration :: plan → agents → tools → verify
             </p>
           </header>
 
@@ -87,9 +93,9 @@ export default function App() {
                   key={example}
                   type="button"
                   onClick={() => setRequestText(example)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 dark:border-gray-800 bg-white/60 dark:bg-gray-900/60 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-400 shadow-sm transition hover:border-indigo-300 hover:text-indigo-700 dark:hover:border-indigo-800 dark:hover:text-indigo-300"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/20 bg-white/[0.03] px-3 py-1.5 text-xs text-cyan-100/60 backdrop-blur-sm transition hover:border-cyan-400/50 hover:text-cyan-200 hover:shadow-[0_0_16px_rgba(34,211,238,0.15)]"
                 >
-                  <Sparkles className="h-3 w-3 text-indigo-400" />
+                  <Sparkles className="h-3 w-3 text-violet-400" />
                   {example}
                 </button>
               ))}

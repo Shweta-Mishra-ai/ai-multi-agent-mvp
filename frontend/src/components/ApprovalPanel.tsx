@@ -26,14 +26,14 @@ export function ApprovalPanel({ actions, onExecuted }: Props) {
   }
 
   return (
-    <div className="rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-4 shadow-sm">
+    <div className="rounded-xl border border-amber-400/20 bg-amber-500/[0.06] p-4 backdrop-blur-sm">
       <div className="flex items-start gap-3">
-        <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500 mt-0.5" />
+        <AlertTriangle className="h-5 w-5 shrink-0 text-amber-400 mt-0.5" />
         <div className="min-w-0 flex-1">
-          <h3 className="font-semibold text-amber-900 dark:text-amber-200">
+          <h3 className="font-semibold text-amber-200">
             {actions.length} action{actions.length > 1 ? 's' : ''} awaiting approval
           </h3>
-          <p className="mt-1 text-sm text-amber-800/80 dark:text-amber-300/80">
+          <p className="mt-1 text-sm text-amber-200/70">
             These irreversible actions were prepared but not executed. Review them,
             then approve to run <em>exactly</em> what was previewed - never a
             re-generated version.
@@ -42,23 +42,23 @@ export function ApprovalPanel({ actions, onExecuted }: Props) {
             {actions.map((action, i) => (
               <li
                 key={i}
-                className="rounded-lg border border-amber-200 dark:border-amber-900 bg-white dark:bg-gray-950 p-3 font-mono text-xs"
+                className="rounded-lg border border-amber-400/20 bg-black/30 p-3 font-mono text-xs"
               >
-                <span className="font-semibold text-amber-700 dark:text-amber-400">
+                <span className="font-semibold text-amber-300">
                   {action.tool}
                 </span>
-                <pre className="mt-1 overflow-x-auto text-gray-600 dark:text-gray-400">
+                <pre className="mt-1 overflow-x-auto text-gray-400">
                   {JSON.stringify(action.args, null, 2)}
                 </pre>
               </li>
             ))}
           </ul>
-          {error && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
+          {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
           <button
             type="button"
             onClick={handleApprove}
             disabled={executing}
-            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-amber-700 hover:shadow-md disabled:opacity-60"
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white shadow-[0_0_16px_rgba(245,158,11,0.3)] transition hover:shadow-[0_0_22px_rgba(245,158,11,0.45)] disabled:opacity-60"
           >
             {executing ? (
               <Loader2 className="h-4 w-4 animate-spin" />

@@ -1,16 +1,47 @@
 @import "tailwindcss";
 
-/* No @custom-variant override here: Tailwind v4's `dark:` variant
-   defaults to `prefers-color-scheme: dark`, which is exactly what this
-   app wants since it has no manual theme toggle - it follows the
-   OS/browser setting automatically. */
+/* AgentOS commits to a single dark, sci-fi "AI OS" aesthetic rather than
+   following prefers-color-scheme - glass panels and neon glow only read
+   correctly against a near-black base, so a light variant would be a
+   different, watered-down design rather than a theme toggle. */
 
 html {
-  color-scheme: light dark;
+  color-scheme: dark;
 }
 
 body {
   margin: 0;
+  background: #05060b;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+@keyframes glow-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(2%, -3%) scale(1.05); }
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 2.4s ease-in-out infinite;
+}
+
+.animate-drift {
+  animation: drift 18s ease-in-out infinite;
+}
+
+.animate-drift-slow {
+  animation: drift 26s ease-in-out infinite reverse;
+}
+
+/* Faint HUD scanline texture over the whole app - decorative only. */
+.hud-grid {
+  background-image:
+    linear-gradient(to right, rgba(103, 232, 249, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(103, 232, 249, 0.035) 1px, transparent 1px);
+  background-size: 42px 42px;
 }
