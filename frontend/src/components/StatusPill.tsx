@@ -10,27 +10,27 @@ const CONFIG: Record<
   queued: {
     icon: CircleDashed,
     label: 'Queued',
-    className: 'text-gray-400 dark:text-gray-500',
+    className: 'text-gray-500',
   },
   running: {
     icon: Loader2,
     label: 'Running',
-    className: 'text-indigo-500 dark:text-indigo-400',
+    className: 'text-cyan-300',
   },
   ok: {
     icon: CheckCircle2,
     label: 'Done',
-    className: 'text-emerald-500 dark:text-emerald-400',
+    className: 'text-emerald-400',
   },
   failed: {
     icon: XCircle,
     label: 'Failed',
-    className: 'text-red-500 dark:text-red-400',
+    className: 'text-red-400',
   },
   skipped: {
     icon: SkipForward,
     label: 'Skipped',
-    className: 'text-amber-500 dark:text-amber-400',
+    className: 'text-amber-400',
   },
 }
 
