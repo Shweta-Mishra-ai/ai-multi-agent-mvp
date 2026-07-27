@@ -22,7 +22,8 @@ def render_page(url):
     worker_token = os.getenv("BROWSER_WORKER_TOKEN")
     if not worker_url or not worker_token:
         return ("Browser rendering is not configured on this deployment "
-                "(BROWSER_WORKER_URL / BROWSER_WORKER_TOKEN not set).")
+                "(BROWSER_WORKER_URL / BROWSER_WORKER_TOKEN not set - see "
+                "browser-worker/README.md to deploy and configure it).")
 
     try:
         r = requests.post(
