@@ -26,7 +26,7 @@ export function ApprovalPanel({ actions, onExecuted }: Props) {
   }
 
   return (
-    <div className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-4">
+    <div className="rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-4 shadow-sm">
       <div className="flex items-start gap-3">
         <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500 mt-0.5" />
         <div className="min-w-0 flex-1">
@@ -42,7 +42,7 @@ export function ApprovalPanel({ actions, onExecuted }: Props) {
             {actions.map((action, i) => (
               <li
                 key={i}
-                className="rounded border border-amber-200 dark:border-amber-900 bg-white dark:bg-gray-950 p-3 font-mono text-xs"
+                className="rounded-lg border border-amber-200 dark:border-amber-900 bg-white dark:bg-gray-950 p-3 font-mono text-xs"
               >
                 <span className="font-semibold text-amber-700 dark:text-amber-400">
                   {action.tool}
@@ -58,7 +58,7 @@ export function ApprovalPanel({ actions, onExecuted }: Props) {
             type="button"
             onClick={handleApprove}
             disabled={executing}
-            className="mt-4 inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60"
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-amber-700 hover:shadow-md disabled:opacity-60"
           >
             {executing ? (
               <Loader2 className="h-4 w-4 animate-spin" />

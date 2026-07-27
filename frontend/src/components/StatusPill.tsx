@@ -15,7 +15,7 @@ const CONFIG: Record<
   running: {
     icon: Loader2,
     label: 'Running',
-    className: 'text-blue-500 dark:text-blue-400',
+    className: 'text-indigo-500 dark:text-indigo-400',
   },
   ok: {
     icon: CheckCircle2,
