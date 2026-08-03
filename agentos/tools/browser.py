@@ -1,8 +1,17 @@
-import os
-
-import requests
+import json
+import subprocess
+import sys
+import threading
 
 from agentos.tools import tool
+
+RENDER_TIMEOUT_S = 25
+
+# Render's free tier is 512MB RAM total. Two headless Chromium instances
+# competing for that at once is a much likelier way to OOM the whole app
+# than one ever is - cap concurrent renders to 1 regardless of how many
+# agent steps are running in parallel.
+_render_slot = threading.Semaphore(1)
 
 
 @tool(
@@ -10,7 +19,9 @@ from agentos.tools import tool
     "return its visible text - use this instead of fetch_url when a page "
     "needs JavaScript to show its content (e.g. a single-page app or a "
     "listing page that loads results dynamically). This cannot log into "
-    "authenticated/private pages - there are no credentials available.",
+    "authenticated/private pages - there are no credentials available. "
+    "Slower and heavier than fetch_url, so only use it when fetch_url's "
+    "result looks empty or useless.",
     {
         "type": "object",
         "properties": {"url": {"type": "string"}},
@@ -18,31 +29,30 @@ from agentos.tools import tool
     },
 )
 def render_page(url):
-    worker_url = os.getenv("BROWSER_WORKER_URL")
-    worker_token = os.getenv("BROWSER_WORKER_TOKEN")
-    if not worker_url or not worker_token:
-        return ("Browser rendering is not configured on this deployment "
-                "(BROWSER_WORKER_URL / BROWSER_WORKER_TOKEN not set - see "
-                "browser-worker/README.md to deploy and configure it).")
+    with _render_slot:
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "agentos.tools._render_subprocess", url],
+                capture_output=True, text=True, timeout=RENDER_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            return f"Rendering {url} timed out after {RENDER_TIMEOUT_S}s."
+
+    output = (result.stdout or "").strip()
+    if not output:
+        # negative returncode means the OS killed it by signal (e.g. -9
+        # for an OOM kill) rather than the script exiting on its own
+        stderr = (result.stderr or "").strip()
+        return (f"Browser rendering failed (exit {result.returncode}): "
+                f"{stderr[-500:] or 'no output - the process may have run out of memory'}")
 
     try:
-        r = requests.post(
-            f"{worker_url.rstrip('/')}/render",
-            json={"url": url},
-            headers={"Authorization": f"Bearer {worker_token}"},
-            timeout=30,
-        )
-        r.raise_for_status()
-        data = r.json()
-    except requests.exceptions.HTTPError as e:
-        detail = e.response.text
-        try:
-            detail = e.response.json().get("detail", detail)
-        except ValueError:
-            pass
-        return f"Browser render failed: {detail}"
-    except Exception as e:
-        return f"Browser worker unavailable: {e}"
+        data = json.loads(output.splitlines()[-1])
+    except (ValueError, IndexError):
+        return f"Browser rendering failed: unexpected output ({output[-500:]})"
+
+    if "error" in data:
+        return f"Browser render failed: {data['error']}"
 
     title = data.get("title", "")
     text = data.get("text", "")
