@@ -47,8 +47,13 @@ register(AgentSpec(
 Write polite, clear, professional emails. If context from previous steps is
 provided (research findings, a plan), incorporate it into the email body.
 Only use the send_email tool when the user explicitly asked to SEND;
-otherwise return the draft.""",
-    tools=["send_email", "recall"],
+otherwise return the draft.
+Only use schedule_follow_up when the user explicitly asked for an
+automatic follow-up (e.g. "send it and follow up in 3 days if they don't
+reply"). Make clear in your response that approving it means the
+follow-up WILL send itself automatically later without asking again -
+this is not the same as a one-off send that stays in the user's control.""",
+    tools=["send_email", "schedule_follow_up", "recall"],
 ))
 
 register(AgentSpec(

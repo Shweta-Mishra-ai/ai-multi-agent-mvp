@@ -1,9 +1,11 @@
 import json
+import time
 from unittest.mock import patch
 
 from tests.conftest import fake_response, make_plan_json
 
 import agentos.planner as planner
+from agentos.memory import default_memory
 from agentos.tools import TOOLS
 
 
@@ -92,3 +94,70 @@ def test_send_email_uses_smtp_when_configured(monkeypatch):
     assert out == "Email sent to a@b.co."
     assert sent == {"host": "smtp.test", "port": 587, "tls": True,
                     "login": ("u@test", "pw"), "to": "a@b.co"}
+
+
+def test_memory_followup_lifecycle():
+    followup_id = default_memory.schedule_followup(
+        "a@b.co", "Re: hi", "just checking in", "<msg1@test>",
+        time.time() - 10, scope="test-followups")
+
+    due = default_memory.due_followups(time.time())
+    assert any(f["id"] == followup_id for f in due)
+    matched = next(f for f in due if f["id"] == followup_id)
+    assert matched["to_addr"] == "a@b.co"
+    assert matched["message_id"] == "<msg1@test>"
+
+    default_memory.mark_followup(followup_id, "sent")
+    due_after = default_memory.due_followups(time.time())
+    assert not any(f["id"] == followup_id for f in due_after)
+
+
+def test_due_followups_excludes_future_ones():
+    default_memory.schedule_followup(
+        "a@b.co", "Re: hi", "body", "<msg2@test>",
+        time.time() + 999999, scope="test-followups")
+
+    due = default_memory.due_followups(time.time())
+    assert not any(f["message_id"] == "<msg2@test>" for f in due)
+
+
+def test_schedule_follow_up_sends_and_schedules(monkeypatch):
+    monkeypatch.setenv("SMTP_HOST", "smtp.test")
+    monkeypatch.setenv("SMTP_USER", "u@test")
+    monkeypatch.setenv("SMTP_PASSWORD", "pw")
+
+    class FakeSMTP:
+        def __init__(self, host, port):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def starttls(self):
+            pass
+
+        def login(self, user, password):
+            pass
+
+        def send_message(self, msg):
+            pass
+
+    with patch("smtplib.SMTP", FakeSMTP):
+        out = TOOLS["schedule_follow_up"]["fn"](
+            to="a@b.co", subject="hi", body="initial",
+            follow_up_body="checking in", send_after_days=2)
+
+    assert "Email sent to a@b.co." in out
+    assert "Follow-up scheduled in 2 day(s)" in out
+
+
+def test_schedule_follow_up_does_not_schedule_when_smtp_unconfigured(monkeypatch):
+    monkeypatch.delenv("SMTP_HOST", raising=False)
+    out = TOOLS["schedule_follow_up"]["fn"](
+        to="a@b.co", subject="hi", body="initial",
+        follow_up_body="checking in", send_after_days=2)
+    assert "NOT sent" in out
+    assert "scheduled" not in out.lower()

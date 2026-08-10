@@ -1,0 +1,27 @@
+name: Email follow-up check
+
+# Render's free tier spins the web service down after 15 minutes of no
+# HTTP traffic - an in-process scheduler would just stop running while
+# idle. This workflow's own HTTP request both wakes the sleeping instance
+# and triggers the check, on a schedule independent of whether anyone's
+# actively using the app. Needs no paid Render feature (their own Cron
+# Jobs start at $1/month) - GitHub Actions scheduled workflows are free
+# for this (one curl every 30 minutes).
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  check-followups:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check due email follow-ups
+        run: |
+          if [ -z "${{ secrets.RENDER_APP_URL }}" ] || [ -z "${{ secrets.FOLLOWUP_CRON_SECRET }}" ]; then
+            echo "RENDER_APP_URL and/or FOLLOWUP_CRON_SECRET repository secrets are not set - skipping."
+            exit 0
+          fi
+          curl -sS --fail --max-time 90 \
+            -X POST "${{ secrets.RENDER_APP_URL }}/internal/check-followups" \
+            -H "X-Cron-Secret: ${{ secrets.FOLLOWUP_CRON_SECRET }}"

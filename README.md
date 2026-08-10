@@ -280,8 +280,34 @@ first, or change the service's branch setting to match.
 | **Render** (dashboard → Environment) | `OPENAI_API_KEY` | ✅ yes | the only key AgentOS needs to run |
 | Render | `TAVILY_API_KEY` | optional | stronger web search (free tier at tavily.com) |
 | Render | `SMTP_HOST/PORT/USER/PASSWORD/FROM` | optional | real email sending (else safe draft-only mode) |
+| Render | `FOLLOWUP_CRON_SECRET` | optional | enables `schedule_follow_up` (automatic email follow-ups) - see below |
+| Render | `IMAP_HOST/USER/PASSWORD` | optional | lets follow-ups detect a reply and skip sending; without it they still send on schedule, just unconditionally |
 | **GitHub Actions** (CI) | — | ❌ none | CI runs the test suite with a **mocked** LLM (`OPENAI_API_KEY: test` is a dummy value already in the workflow) — no real key, no cost, nothing to configure |
 | GitHub Actions (**Evals**, manual) | `OPENAI_API_KEY` secret | optional | the `Evals` workflow runs the golden routing set against the real LLM; add the secret in repo **Settings → Secrets and variables → Actions**, then trigger it from the Actions tab |
+| GitHub Actions (**email-followup-cron**) | `RENDER_APP_URL`, `FOLLOWUP_CRON_SECRET` secrets | optional | same secret value as the Render one above; wakes the free-tier deployment and checks due follow-ups every 30 minutes - see below |
+
+### 📧 Optional: automatic email follow-ups
+
+`schedule_follow_up` sends an email now and automatically sends a
+follow-up later if there's no reply - without anyone asking again.
+Render's free tier spins the web service down after 15 minutes of no
+traffic (and Render's own Cron Jobs aren't free either, $1/month
+minimum), so this runs on a **scheduled GitHub Actions workflow**
+(`.github/workflows/email-followup-cron.yml`) instead: every 30 minutes
+it hits `POST /internal/check-followups` on the deployed app, which both
+wakes it up and checks for due follow-ups.
+
+Setup:
+1. Generate a random secret (e.g. `openssl rand -hex 32`).
+2. Set `FOLLOWUP_CRON_SECRET` to that value on **both** Render (dashboard
+   → Environment) and as a GitHub Actions repository secret (**Settings →
+   Secrets and variables → Actions**).
+3. Add `RENDER_APP_URL` as a GitHub Actions repository secret too, set to
+   your deployment's URL (e.g. `https://ai-multi-agent-mvp.onrender.com`).
+4. Optional, for reply detection: set `IMAP_HOST`/`IMAP_USER`/
+   `IMAP_PASSWORD` on Render (a Gmail app password works the same way SMTP's
+   does). Without these, follow-ups still send on schedule - they just
+   can't detect a reply already arrived and skip sending in that case.
 
 Never commit keys to git — `.env` is gitignored and `render.yaml` marks
 secrets `sync: false`.

@@ -103,6 +103,38 @@ def test_execute_rejects_empty_actions():
     assert client.post("/execute", json={"actions": []}).status_code == 422
 
 
+def test_check_followups_404s_when_not_configured(monkeypatch):
+    monkeypatch.delenv("FOLLOWUP_CRON_SECRET", raising=False)
+    from api import app
+
+    client = TestClient(app)
+    r = client.post("/internal/check-followups",
+                    headers={"X-Cron-Secret": "anything"})
+    assert r.status_code == 404
+
+
+def test_check_followups_rejects_missing_or_wrong_secret(monkeypatch):
+    monkeypatch.setenv("FOLLOWUP_CRON_SECRET", "correct-secret")
+    from api import app
+
+    client = TestClient(app)
+    assert client.post("/internal/check-followups").status_code == 401
+    assert client.post(
+        "/internal/check-followups",
+        headers={"X-Cron-Secret": "wrong"}).status_code == 401
+
+
+def test_check_followups_runs_with_the_correct_secret(monkeypatch):
+    monkeypatch.setenv("FOLLOWUP_CRON_SECRET", "correct-secret")
+    from api import app
+
+    client = TestClient(app)
+    r = client.post("/internal/check-followups",
+                    headers={"X-Cron-Secret": "correct-secret"})
+    assert r.status_code == 200
+    assert set(r.json()) == {"checked", "replied", "sent", "failed"}
+
+
 def test_run_survives_unexpected_kernel_error():
     """Regression test: an uncaught error used to truncate the NDJSON
     stream with no terminal event. The stream must always end with a

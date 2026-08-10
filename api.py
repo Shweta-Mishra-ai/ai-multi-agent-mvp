@@ -7,6 +7,8 @@
     POST /run       -> run a request; streams NDJSON events as they happen
     POST /execute   -> execute action(s) previously returned in an
                        approval_required event, exactly as previewed
+    POST /internal/check-followups -> send/skip due email follow-ups;
+                       machine-to-machine only, see agentos/followup.py
     GET  /auth/google/login, /auth/google/callback -> optional "Sign in
                        with Google" issuing an API key automatically
 
@@ -19,6 +21,7 @@ mode") sharing a single global budget - fine for solo/local use, but a
 public deployment should create keys for real users.
 """
 
+import hmac
 import html
 import json
 import logging
@@ -34,7 +37,7 @@ from pydantic import BaseModel, Field
 
 import agentos
 import agentos.agents  # noqa: F401  (registers built-in agents)
-from agentos import config, monitoring, oauth
+from agentos import config, followup, monitoring, oauth
 from agentos.kernel import Kernel
 from agentos.memory import default_memory
 from agentos.registry import all_specs
@@ -187,6 +190,30 @@ def execute(body: ExecuteRequest,
         return Kernel().execute_approved(body.actions, api_key_id=api_key_id)
     except Exception as e:
         log.exception("unhandled error executing approved actions")
+        monitoring.capture_exception(e)
+        return JSONResponse(status_code=500, content={"message": f"Internal error: {e}"})
+
+
+@app.post("/internal/check-followups")
+def check_followups(x_cron_secret: Optional[str] = Header(None)):
+    """Triggered by a scheduled GitHub Actions workflow (see
+    .github/workflows/email-followup-cron.yml) - not for interactive use.
+    Guarded by a dedicated shared secret rather than the general API-key
+    system, since this is a machine-to-machine trigger with no caller
+    identity of its own, the same shape as the (now in-process) browser
+    worker's token used earlier."""
+    secret = os.getenv("FOLLOWUP_CRON_SECRET")
+    if not secret:
+        raise HTTPException(
+            status_code=404,
+            detail="Email follow-up automation is not configured on this deployment.")
+    if not x_cron_secret or not hmac.compare_digest(x_cron_secret, secret):
+        raise HTTPException(status_code=401, detail="Invalid or missing cron secret.")
+
+    try:
+        return followup.check_due_followups()
+    except Exception as e:
+        log.exception("unhandled error checking follow-ups")
         monitoring.capture_exception(e)
         return JSONResponse(status_code=500, content={"message": f"Internal error: {e}"})
 
