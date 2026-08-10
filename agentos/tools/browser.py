@@ -6,12 +6,12 @@ import threading
 from agentos.tools import tool
 
 RENDER_TIMEOUT_S = 25
+BROWSE_TIMEOUT_S = 90
 
-# Render's free tier is 512MB RAM total. Two headless Chromium instances
-# competing for that at once is a much likelier way to OOM the whole app
-# than one ever is - cap concurrent renders to 1 regardless of how many
-# agent steps are running in parallel.
-_render_slot = threading.Semaphore(1)
+# Shared across both tools: two headless Chromium instances competing for
+# Render's 512MB RAM is a much likelier OOM than one ever is, regardless of
+# which tool launched it.
+_browser_slot = threading.Semaphore(1)
 
 
 @tool(
@@ -29,7 +29,7 @@ _render_slot = threading.Semaphore(1)
     },
 )
 def render_page(url):
-    with _render_slot:
+    with _browser_slot:
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "agentos.tools._render_subprocess", url],
@@ -40,8 +40,6 @@ def render_page(url):
 
     output = (result.stdout or "").strip()
     if not output:
-        # negative returncode means the OS killed it by signal (e.g. -9
-        # for an OOM kill) rather than the script exiting on its own
         stderr = (result.stderr or "").strip()
         return (f"Browser rendering failed (exit {result.returncode}): "
                 f"{stderr[-500:] or 'no output - the process may have run out of memory'}")
@@ -57,3 +55,57 @@ def render_page(url):
     title = data.get("title", "")
     text = data.get("text", "")
     return f"{title}\n\n{text}".strip()
+
+
+@tool(
+    "Accomplish a task that needs REAL interaction with a web page - "
+    "searching a box, clicking links/buttons, filling and submitting a "
+    "form, navigating through multiple steps - using a real headless "
+    "browser driven step by step by an LLM. Much slower and more "
+    "expensive than fetch_url/render_page, so only use it when the task "
+    "genuinely requires clicking or typing, not just reading a page. "
+    "Cannot log into authenticated/private pages - there are no "
+    "credentials available.",
+    {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": "what to accomplish, in plain language "
+                               "(e.g. 'search for React developer jobs "
+                               "and list the first 5 with links')",
+            },
+            "start_url": {
+                "type": "string",
+                "description": "the page to start from",
+            },
+        },
+        "required": ["task", "start_url"],
+    },
+)
+def browse_and_accomplish(task, start_url):
+    with _browser_slot:
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "agentos.tools._browse_subprocess",
+                 task, start_url],
+                capture_output=True, text=True, timeout=BROWSE_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            return f"Browsing task timed out after {BROWSE_TIMEOUT_S}s."
+
+    output = (result.stdout or "").strip()
+    if not output:
+        stderr = (result.stderr or "").strip()
+        return (f"Browsing task failed (exit {result.returncode}): "
+                f"{stderr[-500:] or 'no output - the process may have run out of memory'}")
+
+    try:
+        data = json.loads(output.splitlines()[-1])
+    except (ValueError, IndexError):
+        return f"Browsing task failed: unexpected output ({output[-500:]})"
+
+    if "error" in data:
+        return f"Browsing task failed: {data['error']}"
+
+    return str(data.get("result", "")).strip()

@@ -22,7 +22,11 @@ say clearly that the information may be outdated.
 Use fetch_url first for a page's content; if the returned text looks
 empty or useless (common for JavaScript-rendered pages), try render_page
 instead - it uses a real browser and can see content fetch_url cannot.
-Neither tool can log into authenticated/private pages.
+If the task needs actual interaction - searching a box, clicking through
+results, filling a form - use browse_and_accomplish instead of either;
+it's much slower and more expensive, so only reach for it when reading a
+page genuinely isn't enough. None of these tools can log into
+authenticated/private pages.
 When asked to find freelance work, gigs, or jobs to apply to: use
 find_freelance_jobs to pull real, current, open listings (title, company,
 apply link) - not a description of job platforms.
@@ -32,7 +36,8 @@ skill) and report the specific real results found (each with its source
 URL) - not a general description of where such leads can be found. If a
 search only returns platform overviews and no specific results, say that
 plainly instead of writing an article about the platforms.""",
-    tools=["web_search", "fetch_url", "render_page", "find_freelance_jobs", "now"],
+    tools=["web_search", "fetch_url", "render_page", "browse_and_accomplish",
+          "find_freelance_jobs", "now"],
 ))
 
 register(AgentSpec(

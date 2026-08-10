@@ -7,6 +7,7 @@ ddgs>=9.0
 fastapi>=0.110
 uvicorn>=0.29
 playwright>=1.47
+browser-use>=0.13
 
 # Optional (not required to run AgentOS - see README's Production
 # hardening section): pip install sentry-sdk to enable SENTRY_DSN
