@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, ListChecks } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ListChecks, PenLine } from 'lucide-react'
 import { ApprovalPanel } from './ApprovalPanel'
 import { MetricsBar } from './MetricsBar'
 import { StepCard, type StepViewModel } from './StepCard'
@@ -46,15 +46,23 @@ export function RunView({ state, onExecuted }: Props) {
 
       {state.verify && (
         <div
-          className={`rounded-xl border px-4 py-3 text-sm backdrop-blur-sm ${
+          className={`flex items-start gap-2 rounded-xl border px-4 py-3 text-sm backdrop-blur-sm ${
             state.verify.satisfied
               ? 'border-emerald-400/20 bg-emerald-500/[0.06] text-emerald-300'
               : 'border-amber-400/20 bg-amber-500/[0.06] text-amber-300'
           }`}
         >
-          {state.verify.satisfied
-            ? '✔ Verifier: output satisfies the request'
-            : `✎ Verifier requested a revision: ${state.verify.feedback}`}
+          {state.verify.satisfied ? (
+            <>
+              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+              Verifier: output satisfies the request
+            </>
+          ) : (
+            <>
+              <PenLine className="h-4 w-4 shrink-0 mt-0.5" />
+              Verifier requested a revision: {state.verify.feedback}
+            </>
+          )}
         </div>
       )}
 
