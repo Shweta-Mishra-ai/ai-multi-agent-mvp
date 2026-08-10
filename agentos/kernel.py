@@ -4,7 +4,7 @@ import time
 import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from agentos import config, identity, monitoring, security, telemetry
+from agentos import config, identity, monitoring, reflection, security, telemetry
 from agentos.llm import chat
 from agentos.log import get_logger
 from agentos.memory import default_memory
@@ -145,6 +145,7 @@ class Kernel:
 
         last = len(steps) - 1
         final = str(outputs.get(last, ""))
+        verdict = None
 
         if statuses.get(last) == "ok":
             verdict = self._verify(user_input, steps, outputs)
@@ -162,6 +163,13 @@ class Kernel:
         pending = metrics.pending_actions()
         if pending:
             yield emit({"type": "approval_required", "actions": pending})
+
+        try:
+            reflection.reflect_and_remember(
+                user_input, steps, statuses, outputs, verdict, identity.scope())
+        except Exception as e:
+            log.warning("reflection failed: %s", e)
+            monitoring.capture_exception(e)
 
         try:
             self.memory.add_message(session_id, "user", user_input)

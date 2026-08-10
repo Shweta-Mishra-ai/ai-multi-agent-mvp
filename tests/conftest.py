@@ -55,6 +55,7 @@ def patch_llm(monkeypatch):
         import agentos.kernel as kernel_mod
         import agentos.llm as llm_mod
         import agentos.planner as planner_mod
+        import agentos.reflection as reflection_mod
         from agentos import telemetry
 
         def wrapped(*args, **kwargs):
@@ -63,7 +64,7 @@ def patch_llm(monkeypatch):
             telemetry.record_llm(response)
             return response
 
-        for mod in (llm_mod, planner_mod, kernel_mod, base_mod):
+        for mod in (llm_mod, planner_mod, kernel_mod, base_mod, reflection_mod):
             monkeypatch.setattr(mod, "chat", wrapped)
 
     return _apply
