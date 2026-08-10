@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from openai import BadRequestError
 
-from agentos import config, telemetry
+from agentos import config, identity, reflection, telemetry
 from agentos import tools as toolbox
 from agentos.llm import chat
 
@@ -31,8 +31,17 @@ class Agent:
         if context:
             user_content = f"{task}\n\nContext from previous steps:\n{context}"
 
+        system_prompt = self.spec.system_prompt
+        try:
+            lessons = reflection.relevant_lessons(task, identity.scope())
+        except Exception:
+            lessons = []  # a memory read failure must never block a run
+        if lessons:
+            system_prompt += "\n\nLessons from previous runs (apply if relevant):\n" + \
+                "\n".join(f"- {lesson}" for lesson in lessons)
+
         messages = [
-            {"role": "system", "content": self.spec.system_prompt},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ]
 
