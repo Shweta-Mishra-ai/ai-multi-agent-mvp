@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import { Loader2, Send } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { Loader2, Mic, Send, Square } from 'lucide-react'
+import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
 
 export interface SubmitPayload {
   request: string
@@ -17,6 +18,10 @@ interface Props {
 export function RequestForm({ value, onChange, disabled, onSubmit }: Props) {
   const [energy, setEnergy] = useState<'Low' | 'Medium' | 'High'>('Medium')
   const [approve, setApprove] = useState(false)
+  const baseTextRef = useRef(value)
+  const speech = useSpeechRecognition((transcript) =>
+    onChange(`${baseTextRef.current}${baseTextRef.current ? ' ' : ''}${transcript}`),
+  )
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -24,16 +29,43 @@ export function RequestForm({ value, onChange, disabled, onSubmit }: Props) {
     onSubmit({ request: value.trim(), energy, approve })
   }
 
+  function toggleMic() {
+    if (speech.listening) {
+      speech.stop()
+    } else {
+      baseTextRef.current = value
+      speech.start()
+    }
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        rows={3}
-        placeholder="e.g. Research the top 3 CRM tools, write a comparison report, and draft an email to my manager"
-        className="w-full resize-none rounded-xl border border-cyan-500/15 bg-white/[0.03] px-4 py-3.5 text-sm text-gray-100 backdrop-blur-sm placeholder:text-gray-500 transition focus:border-cyan-400/50 focus:outline-none focus:ring-4 focus:ring-cyan-400/10 focus:shadow-[0_0_24px_rgba(34,211,238,0.12)] disabled:opacity-60"
-      />
+      <div className="relative">
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          rows={3}
+          placeholder="e.g. Research the top 3 CRM tools, write a comparison report, and draft an email to my manager"
+          className="w-full resize-none rounded-xl border border-cyan-500/15 bg-white/[0.03] px-4 py-3.5 pr-14 text-sm text-gray-100 backdrop-blur-sm placeholder:text-gray-500 transition focus:border-cyan-400/50 focus:outline-none focus:ring-4 focus:ring-cyan-400/10 focus:shadow-[0_0_24px_rgba(34,211,238,0.12)] disabled:opacity-60"
+        />
+        {speech.supported && (
+          <button
+            type="button"
+            onClick={toggleMic}
+            disabled={disabled}
+            aria-label={speech.listening ? 'Stop dictation' : 'Start dictation'}
+            title={speech.listening ? 'Stop dictation' : 'Dictate your request'}
+            className={`absolute bottom-3 right-3 flex h-8 w-8 items-center justify-center rounded-full transition disabled:opacity-40 ${
+              speech.listening
+                ? 'bg-red-500/20 text-red-300 shadow-[0_0_14px_rgba(248,113,113,0.4)] animate-glow-pulse'
+                : 'bg-white/5 text-cyan-300 hover:bg-cyan-500/15 hover:text-cyan-200'
+            }`}
+          >
+            {speech.listening ? <Square className="h-3.5 w-3.5" /> : <Mic className="h-4 w-4" />}
+          </button>
+        )}
+      </div>
 
       <div className="flex flex-wrap items-center gap-4">
         <label className="flex items-center gap-2 text-sm text-gray-400">
