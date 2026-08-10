@@ -55,10 +55,22 @@ CREATE TABLE IF NOT EXISTS metrics (
     ts REAL,
     payload TEXT
 );
+CREATE TABLE IF NOT EXISTS email_followups (
+    id TEXT PRIMARY KEY,
+    scope TEXT,
+    to_addr TEXT,
+    subject TEXT,
+    body TEXT,
+    message_id TEXT,
+    scheduled_at REAL,
+    status TEXT DEFAULT 'pending',
+    created_at REAL
+);
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
 CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(type, ts);
 CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics(ts);
+CREATE INDEX IF NOT EXISTS idx_followups_due ON email_followups(status, scheduled_at);
 """
 
 
@@ -382,6 +394,48 @@ class Memory:
                 for k, v in legacy:
                     result.setdefault(k, v)
         return result
+
+    # --- scheduled email follow-ups ---
+
+    def schedule_followup(self, to_addr, subject, body, message_id,
+                          scheduled_at, scope="default"):
+        followup_id = uuid.uuid4().hex[:12]
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO email_followups "
+                "(id, scope, to_addr, subject, body, message_id, "
+                "scheduled_at, status, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
+                (followup_id, scope, to_addr, subject, body, message_id,
+                 scheduled_at, time.time()),
+            )
+        return followup_id
+
+    def due_followups(self, now=None):
+        """Pending follow-ups whose scheduled time has arrived - across all
+        scopes, since the cron endpoint that calls this runs as a single
+        operator-level trigger, not on behalf of any one caller."""
+        now = time.time() if now is None else now
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, scope, to_addr, subject, body, message_id, "
+                "scheduled_at FROM email_followups "
+                "WHERE status = 'pending' AND scheduled_at <= ? "
+                "ORDER BY scheduled_at ASC",
+                (now,),
+            ).fetchall()
+        return [
+            {"id": i, "scope": s, "to_addr": to, "subject": subj,
+             "body": b, "message_id": mid, "scheduled_at": at}
+            for i, s, to, subj, b, mid, at in rows
+        ]
+
+    def mark_followup(self, followup_id, status):
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE email_followups SET status = ? WHERE id = ?",
+                (status, followup_id),
+            )
 
     # --- retention ---
 
