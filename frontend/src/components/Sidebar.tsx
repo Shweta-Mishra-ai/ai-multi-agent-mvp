@@ -1,4 +1,4 @@
-import { Bot, Brain, ChevronRight, Settings, WifiOff } from 'lucide-react'
+import { Bot, ChevronRight, Settings, WifiOff } from 'lucide-react'
 import type { AgentSpec } from '../types'
 
 interface Props {
@@ -11,14 +11,9 @@ export function Sidebar({ agents, healthy, onOpenSettings }: Props) {
   return (
     <aside className="relative z-10 flex w-72 shrink-0 flex-col border-r border-cyan-500/10 bg-black/30 backdrop-blur-md">
       <div className="flex items-center justify-between px-4 py-4">
-        <div className="flex items-center gap-2.5">
-          <span className="relative flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-violet-600 shadow-[0_0_18px_rgba(34,211,238,0.45)]">
-            <Brain className="h-4 w-4 text-white" />
-          </span>
-          <h1 className="bg-gradient-to-r from-cyan-200 to-violet-300 bg-clip-text font-semibold tracking-tight text-transparent">
-            AgentOS
-          </h1>
-        </div>
+        <h1 className="bg-gradient-to-r from-cyan-200 to-violet-300 bg-clip-text font-mono text-sm font-semibold tracking-widest text-transparent">
+          AGENTOS
+        </h1>
         <button
           type="button"
           onClick={onOpenSettings}
