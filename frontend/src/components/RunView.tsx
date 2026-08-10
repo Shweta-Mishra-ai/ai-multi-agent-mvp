@@ -1,7 +1,8 @@
-import { AlertCircle, CheckCircle2, ListChecks, PenLine } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ListChecks, PenLine, Volume2, VolumeX } from 'lucide-react'
 import { ApprovalPanel } from './ApprovalPanel'
 import { MetricsBar } from './MetricsBar'
 import { StepCard, type StepViewModel } from './StepCard'
+import { useSpeechSynthesis } from '../hooks/useSpeechSynthesis'
 import type { ExecuteResult, PlanStep } from '../types'
 import type { RunState } from '../runReducer'
 
@@ -24,6 +25,8 @@ function stepViewModels(plan: PlanStep[], steps: RunState['steps']): StepViewMod
 }
 
 export function RunView({ state, onExecuted }: Props) {
+  const tts = useSpeechSynthesis()
+
   if (state.phase === 'idle') return null
 
   const steps = stepViewModels(state.plan, state.steps)
@@ -97,10 +100,27 @@ export function RunView({ state, onExecuted }: Props) {
 
       {state.finalOutput != null && state.phase === 'done' && (
         <div className="rounded-xl border border-cyan-500/10 bg-white/[0.02] p-4 backdrop-blur-sm">
-          <h3 className="mb-2 flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-cyan-100/50">
-            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-            Result
-          </h3>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-cyan-100/50">
+              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+              Result
+            </h3>
+            <button
+              type="button"
+              onClick={() =>
+                tts.speaking ? tts.stop() : tts.speak(state.finalOutput ?? '')
+              }
+              aria-label={tts.speaking ? 'Stop reading aloud' : 'Read result aloud'}
+              title={tts.speaking ? 'Stop reading aloud' : 'Read aloud'}
+              className={`flex h-6 w-6 items-center justify-center rounded-full transition ${
+                tts.speaking
+                  ? 'text-cyan-300 animate-glow-pulse'
+                  : 'text-gray-500 hover:text-cyan-300'
+              }`}
+            >
+              {tts.speaking ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+            </button>
+          </div>
           <p className="whitespace-pre-wrap text-sm text-gray-200">
             {state.finalOutput}
           </p>
