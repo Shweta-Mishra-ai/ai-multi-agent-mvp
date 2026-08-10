@@ -128,3 +128,24 @@ def test_agent_picks_up_a_stored_lesson(patch_llm):
         identity.set_caller(None)
 
     assert "double-check arithmetic" in seen_system_prompt["content"]
+
+
+def test_agent_survives_a_broken_lesson_lookup(patch_llm, monkeypatch):
+    """A memory-read failure while fetching lessons must never block a
+    run, the same guarantee already given for a broken history read in
+    Kernel.run() - this is what agents/base.py's try/except around
+    relevant_lessons() exists for."""
+    def broken_recall(*args, **kwargs):
+        raise RuntimeError("db unavailable")
+
+    monkeypatch.setattr(default_memory, "recall", broken_recall)
+
+    def fake_chat(messages, tools=None, response_format=None):
+        return fake_response(content="done anyway")
+
+    patch_llm(fake_chat)
+
+    from agentos.registry import get_agent
+    import agentos.agents  # noqa: F401
+
+    assert get_agent("task").run("calculate something") == "done anyway"
