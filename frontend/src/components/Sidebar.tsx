@@ -1,4 +1,4 @@
-import { Bot, Settings, WifiOff } from 'lucide-react'
+import { Bot, Brain, ChevronRight, Settings, WifiOff } from 'lucide-react'
 import type { AgentSpec } from '../types'
 
 interface Props {
@@ -12,8 +12,8 @@ export function Sidebar({ agents, healthy, onOpenSettings }: Props) {
     <aside className="relative z-10 flex w-72 shrink-0 flex-col border-r border-cyan-500/10 bg-black/30 backdrop-blur-md">
       <div className="flex items-center justify-between px-4 py-4">
         <div className="flex items-center gap-2.5">
-          <span className="relative flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-violet-600 text-base shadow-[0_0_18px_rgba(34,211,238,0.45)]">
-            🧠
+          <span className="relative flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-violet-600 shadow-[0_0_18px_rgba(34,211,238,0.45)]">
+            <Brain className="h-4 w-4 text-white" />
           </span>
           <h1 className="bg-gradient-to-r from-cyan-200 to-violet-300 bg-clip-text font-semibold tracking-tight text-transparent">
             AgentOS
@@ -33,26 +33,28 @@ export function Sidebar({ agents, healthy, onOpenSettings }: Props) {
         <h2 className="mb-2 font-mono text-xs uppercase tracking-widest text-cyan-100/30">
           Registered agents
         </h2>
-        <ul className="space-y-2">
+        <ul className="space-y-1.5">
           {agents.map((agent) => (
-            <li
-              key={agent.name}
-              className="group rounded-xl border border-cyan-500/10 bg-white/[0.03] p-3 backdrop-blur-sm transition hover:border-cyan-400/30 hover:bg-white/[0.05] hover:shadow-[0_0_20px_rgba(34,211,238,0.1)]"
-            >
-              <div className="flex items-center gap-2">
-                <Bot className="h-3.5 w-3.5 shrink-0 text-cyan-400" />
-                <span className="font-medium text-sm text-gray-100">
-                  {agent.name}
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-gray-400">
-                {agent.description}
-              </p>
-              {agent.tools.length > 0 && (
-                <p className="mt-1.5 truncate text-[11px] font-mono text-violet-300/50">
-                  {agent.tools.join(', ')}
-                </p>
-              )}
+            <li key={agent.name}>
+              <details className="group rounded-xl border border-cyan-500/10 bg-white/[0.03] backdrop-blur-sm transition hover:border-cyan-400/30 open:border-cyan-400/30 open:bg-white/[0.05]">
+                <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 [&::-webkit-details-marker]:hidden">
+                  <Bot className="h-3.5 w-3.5 shrink-0 text-cyan-400" />
+                  <span className="font-medium text-sm text-gray-100">
+                    {agent.name}
+                  </span>
+                  <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 text-gray-600 transition group-open:rotate-90" />
+                </summary>
+                <div className="px-3 pb-3">
+                  <p className="text-xs text-gray-400">
+                    {agent.description}
+                  </p>
+                  {agent.tools.length > 0 && (
+                    <p className="mt-1.5 text-[11px] font-mono text-violet-300/50">
+                      {agent.tools.join(', ')}
+                    </p>
+                  )}
+                </div>
+              </details>
             </li>
           ))}
         </ul>
