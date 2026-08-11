@@ -49,3 +49,9 @@ EMBEDDING_MODEL = os.getenv("AGENTOS_EMBEDDING_MODEL", "text-embedding-3-small")
 # Render terminates TLS in front of the container) can make the request
 # appear to arrive over http:// even though the public URL is https://.
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
+
+# Optional Instagram/LinkedIn posting (see agentos/social_instagram.py,
+# agentos/social_linkedin.py). Same explicit-not-derived rationale as
+# GOOGLE_REDIRECT_URI above.
+META_REDIRECT_URI = os.getenv("META_REDIRECT_URI")
+LINKEDIN_REDIRECT_URI = os.getenv("LINKEDIN_REDIRECT_URI")

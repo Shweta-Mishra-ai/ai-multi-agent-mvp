@@ -66,6 +66,15 @@ CREATE TABLE IF NOT EXISTS email_followups (
     status TEXT DEFAULT 'pending',
     created_at REAL
 );
+CREATE TABLE IF NOT EXISTS social_accounts (
+    scope TEXT,
+    platform TEXT,
+    access_token TEXT,
+    account_id TEXT,
+    expires_at REAL,
+    connected_at REAL,
+    PRIMARY KEY (scope, platform)
+);
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
 CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(type, ts);
@@ -435,6 +444,44 @@ class Memory:
             conn.execute(
                 "UPDATE email_followups SET status = ? WHERE id = ?",
                 (status, followup_id),
+            )
+
+    # --- connected social accounts ---
+
+    def save_social_token(self, scope, platform, access_token, account_id, expires_at):
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO social_accounts "
+                "(scope, platform, access_token, account_id, expires_at, connected_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(scope, platform) DO UPDATE SET "
+                "access_token = ?, account_id = ?, expires_at = ?, connected_at = ?",
+                (scope, platform, access_token, account_id, expires_at, time.time(),
+                 access_token, account_id, expires_at, time.time()),
+            )
+
+    def get_social_token(self, scope, platform):
+        """{"access_token", "account_id", "expires_at"} or None if this
+        scope has never connected this platform, or its token expired."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT access_token, account_id, expires_at FROM social_accounts "
+                "WHERE scope = ? AND platform = ?",
+                (scope, platform),
+            ).fetchone()
+        if not row:
+            return None
+        access_token, account_id, expires_at = row
+        if expires_at and expires_at < time.time():
+            return None
+        return {"access_token": access_token, "account_id": account_id,
+               "expires_at": expires_at}
+
+    def disconnect_social(self, scope, platform):
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM social_accounts WHERE scope = ? AND platform = ?",
+                (scope, platform),
             )
 
     # --- retention ---

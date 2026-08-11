@@ -285,6 +285,8 @@ first, or change the service's branch setting to match.
 | **GitHub Actions** (CI) | — | ❌ none | CI runs the test suite with a **mocked** LLM (`OPENAI_API_KEY: test` is a dummy value already in the workflow) — no real key, no cost, nothing to configure |
 | GitHub Actions (**Evals**, manual) | `OPENAI_API_KEY` secret | optional | the `Evals` workflow runs the golden routing set against the real LLM; add the secret in repo **Settings → Secrets and variables → Actions**, then trigger it from the Actions tab |
 | GitHub Actions (**email-followup-cron**) | `RENDER_APP_URL`, `FOLLOWUP_CRON_SECRET` secrets | optional | same secret value as the Render one above; wakes the free-tier deployment and checks due follow-ups every 30 minutes - see below |
+| Render | `META_APP_ID/APP_SECRET/REDIRECT_URI` | optional | enables `post_to_instagram` - see below |
+| Render | `LINKEDIN_CLIENT_ID/CLIENT_SECRET/REDIRECT_URI` | optional | enables `post_to_linkedin` - see below |
 
 ### 📧 Optional: automatic email follow-ups
 
@@ -339,6 +341,46 @@ Setup:
 Leave `GOOGLE_CLIENT_ID` unset and these routes 404 - the API behaves
 exactly as if this feature didn't exist.
 
+### 📱 Optional: social media posting (Instagram + LinkedIn)
+
+`post_to_instagram` and `post_to_linkedin` let the `social` agent publish
+directly, gated by the same approval flow as `send_email` - nothing goes
+out without an explicit approve. **This needs real developer-app setup
+only the deployment operator can do, and has NOT been tested against
+Meta's or LinkedIn's real servers in development** (there's no real app
+or public HTTPS callback URL available there) - the request/response
+handling is covered by tests using mocked HTTP responses, but treat the
+live flow as unverified until you've tried it yourself.
+
+Unlike per-user "Sign in with Google", this connects **one** Instagram
+account and **one** LinkedIn profile for the *whole deployment* - the
+same shared-operator-credential model SMTP already uses, not something
+each caller connects separately.
+
+**Instagram** (via the Meta Graph API):
+1. Create a **Business**-type app in [Meta for Developers](https://developers.facebook.com/apps),
+   add the **Instagram Graph API** product.
+2. You need an Instagram **Business or Creator** account linked to a
+   Facebook Page you manage (Meta requires this - a personal IG account
+   can't be used).
+3. Add a valid OAuth redirect: `https://<your-api-domain>/auth/instagram/callback`
+4. Set `META_APP_ID`, `META_APP_SECRET`, `META_REDIRECT_URI` on the service.
+5. Visit `https://<your-api-domain>/auth/instagram/login` once to connect it.
+6. Posting requires a **publicly reachable image URL** - Meta's API fetches
+   the image itself, it doesn't accept a file upload.
+
+**LinkedIn** (posts to your own personal profile, not a company Page):
+1. Create an app in the [LinkedIn Developer Portal](https://www.linkedin.com/developers/apps),
+   add the **Share on LinkedIn** and **Sign In with LinkedIn using OpenID
+   Connect** products.
+2. Add a valid OAuth redirect: `https://<your-api-domain>/auth/linkedin/callback`
+3. Set `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`, `LINKEDIN_REDIRECT_URI`
+   on the service.
+4. Visit `https://<your-api-domain>/auth/linkedin/login` once to connect it.
+
+Leave `META_APP_ID`/`LINKEDIN_CLIENT_ID` unset and the corresponding
+routes and tools behave exactly as if this feature didn't exist.
+
 ---
 
 ## ➕ Adding a new agent (one registration call)
@@ -376,6 +418,10 @@ agentos/
   embeddings.py    # optional semantic embeddings for long-term memory
   monitoring.py    # optional Sentry error monitoring (no-op if unset)
   oauth.py         # optional "Sign in with Google" login flow
+  oauth_state.py   # shared OAuth CSRF-state helper (Instagram/LinkedIn)
+  social_instagram.py  # optional Instagram posting (Meta Graph API)
+  social_linkedin.py   # optional LinkedIn posting (Posts API)
+  followup.py      # scheduled email follow-up checks (GitHub Actions cron)
   log.py           # structured logging
   agents/
     base.py        # generic tool-loop agent (arg validation, output caps)
