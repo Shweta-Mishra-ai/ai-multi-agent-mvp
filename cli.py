@@ -318,6 +318,26 @@ def keys_revoke(key_id: str = typer.Argument(..., help="Key ID from 'keys list'"
 
 
 @app.command()
+def social(
+    action: str = typer.Argument(..., help="disconnect"),
+    platform: str = typer.Argument(..., help="instagram or linkedin"),
+):
+    """Manage connected social accounts. Connecting happens via the web
+    routes (GET /auth/instagram/login, /auth/linkedin/login); disconnecting
+    is a local operator action since it revokes a shared deployment-wide
+    credential, the same operator-only shape as `keys revoke`."""
+    from agentos.memory import default_memory
+
+    if action != "disconnect" or platform not in ("instagram", "linkedin"):
+        console.print("[red]Usage: cli.py social disconnect <instagram|linkedin>[/red]")
+        raise typer.Exit(code=1)
+
+    default_memory.disconnect_social("default", platform)
+    console.print(f"[green]Disconnected {platform}.[/green] Agents can no longer "
+                 f"post to it until it's reconnected via /auth/{platform}/login.")
+
+
+@app.command()
 def doctor():
     """Check the deployment configuration and report problems."""
     import os
@@ -380,6 +400,30 @@ def doctor():
     if oauth.is_configured() and not os.getenv("GOOGLE_REDIRECT_URI"):
         row("Google sign-in", False,
             "GOOGLE_CLIENT_ID is set but GOOGLE_REDIRECT_URI is missing")
+
+    row("Email follow-ups", bool(os.getenv("FOLLOWUP_CRON_SECRET")),
+        "configured — needs the matching GitHub Actions secret too"
+        if os.getenv("FOLLOWUP_CRON_SECRET")
+        else "not configured (optional) — see README's follow-up section")
+    row("Reply detection (IMAP)", bool(os.getenv("IMAP_HOST")),
+        "configured" if os.getenv("IMAP_HOST")
+        else "not configured (optional) — follow-ups still send, just unconditionally")
+
+    from agentos import social_instagram, social_linkedin
+
+    row("Instagram posting", social_instagram.is_configured(),
+        "configured" if social_instagram.is_configured()
+        else "not configured (optional) — see README's social posting section")
+    if social_instagram.is_configured() and not os.getenv("META_REDIRECT_URI"):
+        row("Instagram posting", False,
+            "META_APP_ID is set but META_REDIRECT_URI is missing")
+    row("LinkedIn posting", social_linkedin.is_configured(),
+        "configured" if social_linkedin.is_configured()
+        else "not configured (optional) — see README's social posting section")
+    if social_linkedin.is_configured() and not os.getenv("LINKEDIN_REDIRECT_URI"):
+        row("LinkedIn posting", False,
+            "LINKEDIN_CLIENT_ID is set but LINKEDIN_REDIRECT_URI is missing")
+
     row("Semantic recall", True,
         f"embedding model: {os.getenv('AGENTOS_EMBEDDING_MODEL', 'text-embedding-3-small')} "
         "(falls back to substring search if the provider doesn't support it)")

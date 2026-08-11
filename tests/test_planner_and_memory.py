@@ -71,7 +71,7 @@ def test_send_email_uses_smtp_when_configured(monkeypatch):
     sent = {}
 
     class FakeSMTP:
-        def __init__(self, host, port):
+        def __init__(self, host, port, timeout=None):
             sent["host"], sent["port"] = host, port
 
         def __enter__(self):
@@ -127,7 +127,7 @@ def test_schedule_follow_up_sends_and_schedules(monkeypatch):
     monkeypatch.setenv("SMTP_PASSWORD", "pw")
 
     class FakeSMTP:
-        def __init__(self, host, port):
+        def __init__(self, host, port, timeout=None):
             pass
 
         def __enter__(self):

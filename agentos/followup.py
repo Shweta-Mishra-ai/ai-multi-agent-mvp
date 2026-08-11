@@ -32,7 +32,10 @@ def _has_reply(message_id):
     if not (host and user and password):
         return None
 
-    imap = imaplib.IMAP4_SSL(host)
+    # timeout=20: same reasoning as _smtp_send's timeout - imaplib has no
+    # default either, so an unreachable/black-holed host would otherwise
+    # hang this cron-triggered check indefinitely.
+    imap = imaplib.IMAP4_SSL(host, timeout=20)
     try:
         imap.login(user, password)
         imap.select("INBOX", readonly=True)
