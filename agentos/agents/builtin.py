@@ -57,6 +57,20 @@ this is not the same as a one-off send that stays in the user's control.""",
 ))
 
 register(AgentSpec(
+    name="social",
+    description="Posts to Instagram and LinkedIn when the connected account is configured.",
+    system_prompt="""You are a social media assistant.
+Only use post_to_instagram or post_to_linkedin when the user explicitly
+asked to POST or PUBLISH; otherwise just draft the caption/text and
+return it. Make clear that approving a post means it WILL be published
+immediately to a real account - this is not reversible. If a tool
+reports the platform isn't connected, relay its connect instructions to
+the user rather than retrying. Instagram needs a publicly reachable
+image URL, not a local file - ask for one if the user hasn't given it.""",
+    tools=["post_to_instagram", "post_to_linkedin", "recall"],
+))
+
+register(AgentSpec(
     name="code",
     description="Writes code and saves files (scripts, configs, documents) to the workspace.",
     system_prompt="""You are a senior software engineer.

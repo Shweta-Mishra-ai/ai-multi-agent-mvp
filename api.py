@@ -11,6 +11,10 @@
                        machine-to-machine only, see agentos/followup.py
     GET  /auth/google/login, /auth/google/callback -> optional "Sign in
                        with Google" issuing an API key automatically
+    GET  /auth/instagram/login, /auth/instagram/callback,
+         /auth/linkedin/login, /auth/linkedin/callback -> optional social
+                       posting: connects ONE Instagram/LinkedIn account
+                       for the whole deployment, like SMTP
 
 Authentication: create API keys with `python cli.py keys create <name>`,
 or (if configured) let users self-serve one via GET /auth/google/login.
@@ -37,7 +41,7 @@ from pydantic import BaseModel, Field
 
 import agentos
 import agentos.agents  # noqa: F401  (registers built-in agents)
-from agentos import config, followup, monitoring, oauth
+from agentos import config, followup, monitoring, oauth, social_instagram, social_linkedin
 from agentos.kernel import Kernel
 from agentos.memory import default_memory
 from agentos.registry import all_specs
@@ -264,6 +268,98 @@ def google_callback(code: Optional[str] = None, state: Optional[str] = None,
         <pre style="background:#eee;padding:1em;word-wrap:break-word;">{safe_key}</pre>
         <p>Use it as a header: <code>Authorization: Bearer {safe_key}</code></p>
     """)
+
+
+@app.get("/auth/instagram/login")
+def instagram_login():
+    """Redirects to Meta's consent screen. Requires META_APP_ID,
+    META_APP_SECRET and META_REDIRECT_URI - see the README's social
+    posting section for the Meta Developer app setup this depends on.
+    Connects ONE Instagram account for this whole deployment (like SMTP),
+    not a separate account per API key."""
+    if not social_instagram.is_configured():
+        raise HTTPException(
+            status_code=404,
+            detail="Instagram posting is not configured on this deployment.")
+    redirect_uri = config.META_REDIRECT_URI
+    if not redirect_uri:
+        raise HTTPException(
+            status_code=500,
+            detail="META_REDIRECT_URI is not set on this deployment.")
+    return RedirectResponse(social_instagram.build_authorize_url(redirect_uri))
+
+
+@app.get("/auth/instagram/callback")
+def instagram_callback(code: Optional[str] = None, state: Optional[str] = None,
+                       error: Optional[str] = None):
+    """Exchanges the authorization code for a long-lived token tied to
+    the linked Instagram Business account, then stores it for posting."""
+    if error:
+        raise HTTPException(status_code=400,
+                            detail=f"Instagram connect failed: {error}")
+    if not code or not state or not social_instagram.consume_state(state):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or expired connect attempt - please try again.")
+    try:
+        access_token, ig_account_id, expires_at = social_instagram.exchange_code_for_account(
+            code, config.META_REDIRECT_URI)
+    except Exception as e:
+        log.warning("Instagram OAuth exchange failed: %s", e)
+        monitoring.capture_exception(e)
+        raise HTTPException(status_code=502, detail="Could not connect Instagram.")
+
+    default_memory.save_social_token(
+        "default", "instagram", access_token, ig_account_id, expires_at)
+    return HTMLResponse(
+        "<h2>Instagram connected</h2>"
+        "<p>Agents on this deployment can now post to Instagram when you approve it.</p>")
+
+
+@app.get("/auth/linkedin/login")
+def linkedin_login():
+    """Redirects to LinkedIn's consent screen. Requires LINKEDIN_CLIENT_ID,
+    LINKEDIN_CLIENT_SECRET and LINKEDIN_REDIRECT_URI - see the README's
+    social posting section for the LinkedIn Developer app setup this
+    depends on. Connects ONE LinkedIn profile for this whole deployment
+    (like SMTP), not a separate account per API key."""
+    if not social_linkedin.is_configured():
+        raise HTTPException(
+            status_code=404,
+            detail="LinkedIn posting is not configured on this deployment.")
+    redirect_uri = config.LINKEDIN_REDIRECT_URI
+    if not redirect_uri:
+        raise HTTPException(
+            status_code=500,
+            detail="LINKEDIN_REDIRECT_URI is not set on this deployment.")
+    return RedirectResponse(social_linkedin.build_authorize_url(redirect_uri))
+
+
+@app.get("/auth/linkedin/callback")
+def linkedin_callback(code: Optional[str] = None, state: Optional[str] = None,
+                      error: Optional[str] = None):
+    """Exchanges the authorization code for a token tied to the signed-in
+    member's own profile, then stores it for posting."""
+    if error:
+        raise HTTPException(status_code=400,
+                            detail=f"LinkedIn connect failed: {error}")
+    if not code or not state or not social_linkedin.consume_state(state):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or expired connect attempt - please try again.")
+    try:
+        access_token, member_urn, expires_at = social_linkedin.exchange_code_for_member(
+            code, config.LINKEDIN_REDIRECT_URI)
+    except Exception as e:
+        log.warning("LinkedIn OAuth exchange failed: %s", e)
+        monitoring.capture_exception(e)
+        raise HTTPException(status_code=502, detail="Could not connect LinkedIn.")
+
+    default_memory.save_social_token(
+        "default", "linkedin", access_token, member_urn, expires_at)
+    return HTMLResponse(
+        "<h2>LinkedIn connected</h2>"
+        "<p>Agents on this deployment can now post to LinkedIn when you approve it.</p>")
 
 
 # Serve the built React frontend (frontend/dist) at "/", if present. This

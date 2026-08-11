@@ -41,4 +41,4 @@ def resolve(names):
 
 
 # Importing the modules registers their tools.
-from agentos.tools import system, files, web, mail, memtools, jobs, browser  # noqa: E402,F401
+from agentos.tools import system, files, web, mail, memtools, jobs, browser, social  # noqa: E402,F401
