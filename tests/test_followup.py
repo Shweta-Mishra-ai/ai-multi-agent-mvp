@@ -60,6 +60,25 @@ def test_skips_send_when_reply_found(monkeypatch):
     fake_imap.logout.assert_called_once()
 
 
+def test_has_reply_connects_with_a_socket_timeout(monkeypatch):
+    """Regression guard: imaplib has no default timeout of its own, so an
+    unreachable host would otherwise hang this call forever (see
+    agentos/followup.py's _has_reply)."""
+    monkeypatch.setenv("IMAP_HOST", "imap.test")
+    monkeypatch.setenv("IMAP_USER", "u@test")
+    monkeypatch.setenv("IMAP_PASSWORD", "pw")
+
+    fake_imap = MagicMock()
+    fake_imap.search.return_value = ("OK", [b""])
+
+    with patch("agentos.followup.imaplib.IMAP4_SSL",
+              return_value=fake_imap) as mock_imap_ssl:
+        followup._has_reply("<some-id@test>")
+
+    _, kwargs = mock_imap_ssl.call_args
+    assert kwargs.get("timeout") == 20
+
+
 def test_sends_when_imap_configured_but_no_reply(monkeypatch):
     monkeypatch.setenv("IMAP_HOST", "imap.test")
     monkeypatch.setenv("IMAP_USER", "u@test")

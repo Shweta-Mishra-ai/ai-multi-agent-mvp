@@ -1,6 +1,6 @@
 import json
 import time
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from tests.conftest import fake_response, make_plan_json
 
@@ -94,6 +94,22 @@ def test_send_email_uses_smtp_when_configured(monkeypatch):
     assert out == "Email sent to a@b.co."
     assert sent == {"host": "smtp.test", "port": 587, "tls": True,
                     "login": ("u@test", "pw"), "to": "a@b.co"}
+
+
+def test_send_email_connects_with_a_socket_timeout(monkeypatch):
+    """Regression guard: smtplib has no default timeout of its own, so an
+    unreachable host would otherwise hang this call forever (see
+    agentos/tools/mail.py's _smtp_send)."""
+    monkeypatch.setenv("SMTP_HOST", "smtp.test")
+    monkeypatch.setenv("SMTP_USER", "u@test")
+    monkeypatch.setenv("SMTP_PASSWORD", "pw")
+
+    with patch("smtplib.SMTP") as mock_smtp_cls:
+        mock_smtp_cls.return_value.__enter__.return_value = MagicMock()
+        TOOLS["send_email"]["fn"](to="a@b.co", subject="hi", body="test")
+
+    _, kwargs = mock_smtp_cls.call_args
+    assert kwargs.get("timeout") == 20
 
 
 def test_memory_followup_lifecycle():
