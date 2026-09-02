@@ -31,7 +31,11 @@ def _smtp_send(to, subject, body, message_id=None, in_reply_to=None):
         if in_reply_to:
             msg["In-Reply-To"] = in_reply_to
             msg["References"] = in_reply_to
-        with smtplib.SMTP(host, int(os.getenv("SMTP_PORT", "587"))) as server:
+        # timeout=20: without it, a misconfigured/unreachable host that
+        # black-holes packets (rather than refusing the connection) hangs
+        # this call forever instead of failing - unlike every other network
+        # call in this codebase, smtplib has no default timeout of its own.
+        with smtplib.SMTP(host, int(os.getenv("SMTP_PORT", "587")), timeout=20) as server:
             server.starttls()
             server.login(user, password)
             server.send_message(msg)
