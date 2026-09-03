@@ -1,4 +1,10 @@
-import type { AgentEvent, AgentSpec, ExecuteResult, PendingAction } from './types'
+import type {
+  AgentEvent,
+  AgentSpec,
+  DiagnosticsReport,
+  ExecuteResult,
+  PendingAction,
+} from './types'
 
 const API_KEY_STORAGE = 'agentos_api_key'
 
@@ -33,6 +39,17 @@ export async function fetchAgents(): Promise<AgentSpec[]> {
 export async function fetchHealth(): Promise<{ status: string; version: string }> {
   const res = await fetch('/health')
   if (!res.ok) throw new ApiError(`Health check failed (${res.status})`, res.status)
+  return res.json()
+}
+
+/**
+ * Runs the real self-check (live LLM call, real search, real DB write).
+ * Slower than /health by design - it exercises the dependencies instead
+ * of just confirming the process is up.
+ */
+export async function fetchDiagnostics(): Promise<DiagnosticsReport> {
+  const res = await fetch('/diagnostics')
+  if (!res.ok) throw new ApiError(`Diagnostics failed (${res.status})`, res.status)
   return res.json()
 }
 

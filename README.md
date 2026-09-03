@@ -273,12 +273,40 @@ branch and the Render service is configured for `main` (the default),
 you'll be deploying code that doesn't contain it — merge the branch
 first, or change the service's branch setting to match.
 
+### 🩺 Why are my answers vague? Run the system check
+
+`GET /diagnostics` (or the **run system check** button in the sidebar)
+actually exercises every dependency — it makes a real LLM call, runs a
+real web search, and writes to the real database — and reports the true
+error for anything broken. This is different from `/health`, which only
+proves the process is running and stays green while the LLM or search is
+completely dead.
+
+The most common cause of "it runs but the answer is generic and useless"
+is **web search silently failing**. With no `TAVILY_API_KEY` or
+`BRAVE_API_KEY` set, search falls back to keyless DuckDuckGo scraping,
+which cloud hosts like Render are almost always blocked from.
+
+Search failure is now **loud, not silent**: the research agent is told it
+has no sources and must say so, rather than quietly writing a
+confident-sounding article from the model's own memory. A made-up answer
+that reads like real research is worse than no answer, because you can't
+tell the difference.
+
+> ⚠️ **Free-tier storage is ephemeral.** On Render's free plan with no
+> disk attached, `/data` resets every time the service sleeps (15 min
+> idle) or redeploys. That deletes scheduled email follow-ups before they
+> can fire, connected Instagram/LinkedIn tokens, saved memory and
+> lessons, and any API keys you created. The system check's **Storage**
+> row tells you whether your data actually survived a restart. Persisting
+> it needs a paid plan with a disk, or an external database.
+
 ### 🔑 Which keys go where
 
 | Where | Key | Required? | Purpose |
 |---|---|---|---|
 | **Render** (dashboard → Environment) | `OPENAI_API_KEY` | ✅ yes | the only key AgentOS needs to run |
-| Render | `TAVILY_API_KEY` | optional | stronger web search (free tier at tavily.com) |
+| Render | `TAVILY_API_KEY` or `BRAVE_API_KEY` | **strongly recommended** | real web search. Without one, search falls back to keyless DuckDuckGo scraping, which cloud hosts are blocked from — the research agent then has no sources and refuses to research rather than guessing. See "Why are my answers vague?" below |
 | Render | `SMTP_HOST/PORT/USER/PASSWORD/FROM` | optional | real email sending (else safe draft-only mode) |
 | Render | `FOLLOWUP_CRON_SECRET` | optional | enables `schedule_follow_up` (automatic email follow-ups) - see below |
 | Render | `IMAP_HOST/USER/PASSWORD` | optional | lets follow-ups detect a reply and skip sending; without it they still send on schedule, just unconditionally |

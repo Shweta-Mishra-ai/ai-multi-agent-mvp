@@ -33,7 +33,13 @@ services:
         sync: false          # prompted securely in the dashboard, never in git
       - key: OPENAI_BASE_URL
         value: ""             # leave empty for OpenAI; set for Groq/Gemini/etc.
+      # Strongly recommended: without a search key the research agent has
+      # no sources on Render (keyless DuckDuckGo scraping is blocked from
+      # cloud IPs) and will refuse to research rather than invent an
+      # answer. Check the live state at /diagnostics.
       - key: TAVILY_API_KEY
+        sync: false
+      - key: BRAVE_API_KEY
         sync: false
       - key: AGENTOS_MODEL
         value: gpt-4o-mini    # e.g. llama-3.3-70b-versatile for Groq
