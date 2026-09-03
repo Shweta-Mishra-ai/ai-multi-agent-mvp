@@ -53,6 +53,44 @@ def test_a_crashing_check_is_reported_not_raised():
     assert "check crashed" in report["checks"]["boom"]["detail"]
 
 
+def test_run_diagnostics_reports_healthy_when_every_check_passes():
+    with patch.object(diagnostics, "CHECKS", (
+        ("a", lambda: {"ok": True, "detail": "fine"}),
+        ("b", lambda: {"ok": True, "detail": "also fine"}),
+    )):
+        report = diagnostics.run_diagnostics()
+    assert report["healthy"] is True
+    assert set(report["checks"]) == {"a", "b"}
+    assert "optional" in report
+
+
+def test_one_failing_check_makes_the_whole_report_unhealthy():
+    with patch.object(diagnostics, "CHECKS", (
+        ("a", lambda: {"ok": True, "detail": "fine"}),
+        ("b", lambda: {"ok": False, "detail": "broken"}),
+    )):
+        report = diagnostics.run_diagnostics()
+    assert report["healthy"] is False
+
+
+def test_endpoint_returns_the_real_report_shape():
+    """Hits the endpoint with only the external dependencies mocked, so
+    the actual wiring (route -> run_diagnostics -> checks) is exercised."""
+    import api
+
+    with patch("agentos.llm.chat", return_value=object()), \
+         patch("agentos.tools.web.web_search", return_value="T\nhttps://x\ns"):
+        r = TestClient(api.app).get("/diagnostics")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) == {"healthy", "checks", "optional"}
+    for name in ("llm", "search", "storage", "tools"):
+        assert name in body["checks"]
+        assert set(body["checks"][name]) == {"ok", "detail"}
+    assert body["checks"]["tools"]["ok"] is True
+
+
 def test_endpoint_returns_200_even_when_everything_is_broken():
     import api
 

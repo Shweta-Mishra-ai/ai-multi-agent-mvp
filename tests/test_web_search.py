@@ -97,6 +97,55 @@ def test_total_failure_names_each_provider_error():
     assert "Two: two exploded" in out
 
 
+def test_keyed_providers_return_none_when_unconfigured():
+    """None means 'skip me', which is what lets the chain fall through to
+    the next provider instead of reporting a phantom error."""
+    assert web._search_tavily("q") is None
+    assert web._search_brave("q") is None
+
+
+def test_research_agent_is_told_search_failed_through_the_real_tool_loop(patch_llm):
+    """End-to-end through the actual agent: the honest failure text must
+    survive the tool loop and reach the model as the tool result. This is
+    the contract that stops it inventing an answer."""
+    from agentos.registry import get_agent
+    from tests.conftest import fake_response, fake_tool_call
+
+    seen_tool_messages = []
+    calls = {"n": 0}
+
+    def fake_chat(messages, tools=None, response_format=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return fake_response(
+                tool_calls=[fake_tool_call("web_search", {"query": "anything"})])
+        seen_tool_messages.extend(
+            m["content"] for m in messages if isinstance(m, dict) and m.get("role") == "tool"
+        )
+        return fake_response(content="Web search is unavailable on this deployment.")
+
+    patch_llm(fake_chat)
+
+    with patch.dict(web.__dict__, {"SEARCH_PROVIDERS": (
+        ("Fake", lambda q: (_ for _ in ()).throw(Exception("blocked by host"))),
+    )}):
+        out = get_agent("research").run("research anything")
+
+    assert any(SEARCH_FAILED_PREFIX in m for m in seen_tool_messages)
+    assert any("do not invent sources" in m.lower() for m in seen_tool_messages)
+    assert out == "Web search is unavailable on this deployment."
+
+
+def test_research_prompt_forbids_answering_from_memory():
+    """Guards the prompt half of the contract: the tool can report failure
+    honestly, but only the prompt stops the model papering over it."""
+    from agentos.registry import get_agent
+
+    prompt = get_agent("research").spec.system_prompt.lower()
+    assert "search_failed" in prompt
+    assert "never substitute your own knowledge" in prompt
+
+
 def test_unconfigured_providers_are_skipped_not_reported_as_errors():
     """A provider returning None means 'no key set' - that isn't an error
     worth showing the user, unlike a provider that actually failed."""
