@@ -3,6 +3,8 @@
     python cli.py serve            # or: uvicorn api:app --host 0.0.0.0
 
     GET  /health    -> liveness probe for load balancers / orchestrators
+    GET  /diagnostics -> real self-check: live LLM call, real search, real
+                       DB write, reporting the true error for each
     GET  /agents    -> registered agents and their tools
     POST /run       -> run a request; streams NDJSON events as they happen
     POST /execute   -> execute action(s) previously returned in an
@@ -150,6 +152,20 @@ def health():
                    or "unknown")[:12],
         "web_ui_built": _frontend_dist_exists(),
     }
+
+
+@app.get("/diagnostics")
+def diagnostics():
+    """What is ACTUALLY working on this deployment: makes a real LLM call,
+    runs a real search, writes to the real database, and reports the true
+    error for anything that fails.
+
+    Unauthenticated on purpose - it's the tool you need precisely when
+    the deployment is misbehaving (possibly including auth itself), and
+    it never returns secrets: keys are reported only as present/absent."""
+    from agentos import diagnostics as diag
+
+    return diag.run_diagnostics()
 
 
 @app.get("/agents")

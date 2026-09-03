@@ -6,6 +6,65 @@ import requests
 from agentos.tools import tool
 
 
+# Returned when every search provider failed. Deliberately does NOT tell
+# the agent to answer from its own knowledge: doing that produced
+# confident, generic, made-up articles that looked identical to real
+# researched answers, with nothing anywhere telling the user the search
+# never actually happened. Failing loudly is worth more than a fluent
+# guess.
+SEARCH_FAILED_PREFIX = "SEARCH_FAILED"
+
+
+def _search_tavily(query):
+    key = os.getenv("TAVILY_API_KEY")
+    if not key:
+        return None  # not configured - try the next provider
+    r = requests.post(
+        "https://api.tavily.com/search",
+        json={"api_key": key, "query": query, "max_results": 5},
+        timeout=20,
+    )
+    r.raise_for_status()
+    return [
+        (x["title"], x["url"], x.get("content", "")[:300])
+        for x in r.json().get("results", [])
+    ]
+
+
+def _search_brave(query):
+    key = os.getenv("BRAVE_API_KEY")
+    if not key:
+        return None
+    r = requests.get(
+        "https://api.search.brave.com/res/v1/web/search",
+        params={"q": query, "count": 5},
+        headers={"Accept": "application/json", "X-Subscription-Token": key},
+        timeout=20,
+    )
+    r.raise_for_status()
+    return [
+        (x.get("title", ""), x.get("url", ""), x.get("description", "")[:300])
+        for x in r.json().get("web", {}).get("results", [])
+    ]
+
+
+def _search_ddgs(query):
+    """No API key, but it scrapes DuckDuckGo/Startpage - which routinely
+    block datacenter IPs, so this fails on most cloud hosts (Render
+    included). Kept as a last resort for local use, not relied on."""
+    from ddgs import DDGS
+
+    return [(x["title"], x["href"], x["body"][:300])
+            for x in DDGS().text(query, max_results=5)]
+
+
+SEARCH_PROVIDERS = (
+    ("Tavily", _search_tavily),
+    ("Brave", _search_brave),
+    ("DuckDuckGo", _search_ddgs),
+)
+
+
 @tool(
     "Search the web and return the top results (title, url, snippet).",
     {
@@ -15,34 +74,31 @@ from agentos.tools import tool
     },
 )
 def web_search(query):
-    tavily_key = os.getenv("TAVILY_API_KEY")
-    if tavily_key:
+    """Tries each configured provider in turn. A provider that isn't
+    configured is skipped; one that errors is recorded and the next is
+    tried - previously a failing Tavily call returned immediately without
+    ever falling back."""
+    errors = []
+    for name, provider in SEARCH_PROVIDERS:
         try:
-            r = requests.post(
-                "https://api.tavily.com/search",
-                json={"api_key": tavily_key, "query": query, "max_results": 5},
-                timeout=20,
-            )
-            r.raise_for_status()
-            return "\n\n".join(
-                f"{x['title']}\n{x['url']}\n{x.get('content', '')[:300]}"
-                for x in r.json().get("results", [])
-            ) or "No results."
+            results = provider(query)
         except Exception as e:
-            return f"Tavily search failed: {e}"
+            errors.append(f"{name}: {e}")
+            continue
+        if results is None:
+            continue  # provider not configured
+        if results:
+            return "\n\n".join(f"{t}\n{u}\n{s}" for t, u, s in results)
+        errors.append(f"{name}: no results")
 
-    try:
-        from ddgs import DDGS
-
-        results = DDGS().text(query, max_results=5)
-        return "\n\n".join(
-            f"{x['title']}\n{x['href']}\n{x['body'][:300]}" for x in results
-        ) or "No results."
-    except Exception as e:
-        return (
-            f"Web search unavailable ({e}). "
-            "Answer from your own knowledge and say the information may be outdated."
-        )
+    detail = "; ".join(errors) or "no search provider is configured"
+    return (
+        f"{SEARCH_FAILED_PREFIX}: the web search did not run ({detail}). "
+        "You have NO search results. Do not write an answer from your own "
+        "knowledge and do not invent sources - tell the user plainly that "
+        "web search is unavailable on this deployment and that setting "
+        "TAVILY_API_KEY (free tier at tavily.com) or BRAVE_API_KEY fixes it."
+    )
 
 
 MAX_FETCH_BYTES = 2_000_000  # cap response body read to bound memory use

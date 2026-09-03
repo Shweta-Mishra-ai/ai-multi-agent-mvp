@@ -46,3 +46,14 @@ export interface ExecuteResult {
   args: Record<string, unknown>
   result: string
 }
+
+export interface DiagnosticCheck {
+  ok: boolean
+  detail: string
+}
+
+export interface DiagnosticsReport {
+  healthy: boolean
+  checks: Record<string, DiagnosticCheck>
+  optional: Record<string, boolean>
+}

@@ -1,4 +1,5 @@
 import { Bot, ChevronRight, Settings, WifiOff } from 'lucide-react'
+import { SystemCheck } from './SystemCheck'
 import type { AgentSpec } from '../types'
 
 interface Props {
@@ -55,7 +56,12 @@ export function Sidebar({ agents, healthy, onOpenSettings }: Props) {
         </ul>
       </div>
 
-      <div className="border-t border-cyan-500/10 px-4 py-3">
+      <div className="space-y-3 border-t border-cyan-500/10 px-4 py-3">
+        {/* /health only proves the process is up - it stays green while
+            the LLM or search is broken, which is exactly when answers go
+            vague. The system check below tests the real dependencies. */}
+        <SystemCheck />
+
         {healthy === null ? (
           <span className="font-mono text-xs text-gray-500">checking connection…</span>
         ) : healthy ? (
