@@ -314,7 +314,17 @@ class Kernel:
                         "fine, missing or wrong content is not. An output that "
                         "shows a prepared action awaiting the user's approval "
                         "(e.g. an email draft pending confirmation) counts as "
-                        "satisfying the request."},
+                        "satisfying the request. "
+                        "If a step reports that a tool or data source was "
+                        "unavailable (for example SEARCH_FAILED, no results, a "
+                        "failed fetch), then an output that honestly states what "
+                        "could not be retrieved IS satisfying - mark it "
+                        "satisfied. NEVER ask for missing information to be "
+                        "filled in, expanded or completed: the agents would "
+                        "supply it from the model's own memory, producing "
+                        "invented detail the user cannot distinguish from real "
+                        "findings. A short honest answer is the correct outcome "
+                        "there, not a failure to fix."},
                     {"role": "user", "content":
                         f"User request: {user_input}\n\nStep outputs:\n{results}"},
                 ],

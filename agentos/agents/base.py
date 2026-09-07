@@ -7,6 +7,29 @@ from agentos import config, identity, reflection, telemetry
 from agentos import tools as toolbox
 from agentos.llm import chat
 
+# Appended to EVERY agent's system prompt, centrally, so no individual
+# agent (or future one) can quietly omit it.
+#
+# Why this exists: fixing web_search to report failure honestly was not
+# enough. A plan like "research X -> write it up" would have research
+# correctly report it had no sources, and then the writer agent - whose
+# own prompt only said "ground your writing in the context" - would
+# happily produce a polished, confident document from the model's own
+# memory, inventing product names and figures. The user cannot tell that
+# apart from real research, which makes it worse than an error.
+GROUNDING_RULE = """
+
+Grounding rule (applies to every answer, overrides any instruction above):
+Work only from the tool results and step context you were actually given.
+If a tool reported failure (for example a result starting with
+SEARCH_FAILED), or the context you depend on is missing or says data could
+not be retrieved, state that plainly and stop. Do not fill the gap from
+your own knowledge. Never invent facts, sources, URLs, product names,
+figures or quotes. A short honest answer naming exactly what was
+unavailable is correct and complete; a fluent answer built on data you
+never received is a failure, because the reader cannot tell the two
+apart."""
+
 
 class Agent:
     """Generic tool-loop agent: calls the LLM, executes requested tools,
@@ -31,7 +54,7 @@ class Agent:
         if context:
             user_content = f"{task}\n\nContext from previous steps:\n{context}"
 
-        system_prompt = self.spec.system_prompt
+        system_prompt = self.spec.system_prompt + GROUNDING_RULE
         try:
             lessons = reflection.relevant_lessons(task, identity.scope())
         except Exception:

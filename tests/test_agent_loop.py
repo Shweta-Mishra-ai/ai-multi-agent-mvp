@@ -20,7 +20,9 @@ def make_agent(tools=()):
 def test_answers_directly_without_tools(patch_llm):
     def fake_chat(messages, tools=None, response_format=None):
         assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == "You are a test agent."
+        # The agent's own prompt leads; the shared grounding rule is
+        # appended after it (see agents/base.py GROUNDING_RULE).
+        assert messages[0]["content"].startswith("You are a test agent.")
         assert tools is None  # agent has no tools -> none sent to the LLM
         return fake_response(content="direct answer")
 
