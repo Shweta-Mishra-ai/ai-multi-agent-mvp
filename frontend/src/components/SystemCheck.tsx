@@ -8,6 +8,7 @@ const CHECK_LABELS: Record<string, string> = {
   search: 'Web search',
   storage: 'Storage',
   tools: 'Tools',
+  browser: 'Browser control',
 }
 
 /**

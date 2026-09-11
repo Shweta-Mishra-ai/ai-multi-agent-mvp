@@ -53,6 +53,30 @@ def test_render_page_handles_oom_kill():
     assert "-9" in result
 
 
+def test_render_page_oom_kill_names_it_plainly_not_just_the_exit_code():
+    """Regression: exit -9 alone tells a non-technical reader nothing.
+    The message must actually say it's a memory kill and what to do
+    about it, since that's the single likeliest failure on Render's
+    512MB free tier."""
+    killed = _completed(stdout="", stderr="", returncode=-9)
+    with patch("agentos.tools.browser.subprocess.run", return_value=killed):
+        result = render_page(url="https://example.com")
+    lowered = result.lower()
+    assert "out of memory" in lowered
+    assert "signal 9" in lowered
+    assert "more ram" in lowered or "paid plan" in lowered
+
+
+def test_a_positive_exit_code_is_not_mistaken_for_a_signal_kill():
+    """A normal crash (positive exit code, real stderr) must surface the
+    real stderr, not the OOM guess meant for negative/signal codes."""
+    crashed = _completed(stdout="", stderr="ValueError: boom", returncode=1)
+    with patch("agentos.tools.browser.subprocess.run", return_value=crashed):
+        result = render_page(url="https://example.com")
+    assert "ValueError: boom" in result
+    assert "out of memory" not in result.lower()
+
+
 def test_render_page_handles_malformed_output():
     garbled = _completed(stdout="not json at all")
     with patch("agentos.tools.browser.subprocess.run", return_value=garbled):
