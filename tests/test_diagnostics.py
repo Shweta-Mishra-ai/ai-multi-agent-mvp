@@ -85,10 +85,34 @@ def test_endpoint_returns_the_real_report_shape():
     assert r.status_code == 200
     body = r.json()
     assert set(body) == {"healthy", "checks", "optional"}
-    for name in ("llm", "search", "storage", "tools"):
+    for name in ("llm", "search", "storage", "tools", "browser"):
         assert name in body["checks"]
         assert set(body["checks"][name]) == {"ok", "detail"}
     assert body["checks"]["tools"]["ok"] is True
+
+
+def test_browser_check_passes_when_libraries_are_installed():
+    result = diagnostics._check_browser()
+    assert result["ok"] is True
+    # must not overclaim: it verified the library imports, not that
+    # Chromium launches or survives this host's actual RAM
+    assert "does not confirm" in result["detail"].lower()
+
+
+def test_browser_check_fails_honestly_when_not_installed():
+    import builtins
+
+    real_import = builtins.__import__
+
+    def blocked_import(name, *a, **kw):
+        if name in ("browser_use", "playwright"):
+            raise ImportError(f"No module named '{name}'")
+        return real_import(name, *a, **kw)
+
+    with patch("builtins.__import__", side_effect=blocked_import):
+        result = diagnostics._check_browser()
+    assert result["ok"] is False
+    assert "not installed" in result["detail"].lower()
 
 
 def test_endpoint_returns_200_even_when_everything_is_broken():

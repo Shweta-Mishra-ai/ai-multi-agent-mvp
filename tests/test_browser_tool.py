@@ -5,6 +5,8 @@ real page) to verify the whole path works, not just the plumbing around
 it - the failure mode this exists to catch (an OOM-killed render) can
 only show up when something really runs the browser."""
 
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
 from agentos.tools.browser import browse_and_accomplish, render_page
@@ -51,6 +53,30 @@ def test_render_page_handles_oom_kill():
         result = render_page(url="https://example.com")
     assert "failed" in result.lower()
     assert "-9" in result
+
+
+def test_render_page_oom_kill_names_it_plainly_not_just_the_exit_code():
+    """Regression: exit -9 alone tells a non-technical reader nothing.
+    The message must actually say it's a memory kill and what to do
+    about it, since that's the single likeliest failure on Render's
+    512MB free tier."""
+    killed = _completed(stdout="", stderr="", returncode=-9)
+    with patch("agentos.tools.browser.subprocess.run", return_value=killed):
+        result = render_page(url="https://example.com")
+    lowered = result.lower()
+    assert "out of memory" in lowered
+    assert "signal 9" in lowered
+    assert "more ram" in lowered or "paid plan" in lowered
+
+
+def test_a_positive_exit_code_is_not_mistaken_for_a_signal_kill():
+    """A normal crash (positive exit code, real stderr) must surface the
+    real stderr, not the OOM guess meant for negative/signal codes."""
+    crashed = _completed(stdout="", stderr="ValueError: boom", returncode=1)
+    with patch("agentos.tools.browser.subprocess.run", return_value=crashed):
+        result = render_page(url="https://example.com")
+    assert "ValueError: boom" in result
+    assert "out of memory" not in result.lower()
 
 
 def test_render_page_handles_malformed_output():
@@ -120,6 +146,36 @@ def test_browse_and_accomplish_handles_malformed_output():
     with patch("agentos.tools.browser.subprocess.run", return_value=garbled):
         result = browse_and_accomplish(task="x", start_url="https://example.com")
     assert "unexpected output" in result
+
+
+def test_browser_slot_serializes_concurrent_calls():
+    """The whole point of _browser_slot: two Chromium instances competing
+    for Render's 512MB is a much likelier OOM than one ever is. Two
+    threads calling render_page at once must never overlap inside the
+    "subprocess running" window - each must fully finish (release the
+    slot) before the next one's subprocess.run is invoked."""
+    active = []
+    max_concurrent = []
+    lock = threading.Lock()
+
+    def fake_run(*a, **kw):
+        with lock:
+            active.append(1)
+            max_concurrent.append(len(active))
+        time.sleep(0.05)  # hold the "browser running" window open
+        with lock:
+            active.pop()
+        return _completed(stdout='{"title": "t", "text": "x"}\n')
+
+    with patch("agentos.tools.browser.subprocess.run", side_effect=fake_run):
+        threads = [threading.Thread(target=render_page, kwargs={"url": "https://example.com"})
+                  for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+    assert max(max_concurrent) == 1  # never more than one at a time
 
 
 def test_browse_subprocess_constructs_real_agent_objects_without_error():

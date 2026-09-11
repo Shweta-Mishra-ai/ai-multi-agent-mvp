@@ -100,6 +100,32 @@ def _check_tools():
     return {"ok": bool(TOOLS), "detail": f"{len(TOOLS)} tools registered"}
 
 
+def _check_browser():
+    """Deliberately does NOT launch a real browser here - that would make
+    every /diagnostics call spawn headless Chromium, which on Render's
+    512MB free tier is exactly the resource this whole check exists to be
+    careful about. This only confirms the libraries are importable; it
+    cannot prove render_page/browse_and_accomplish will survive a real
+    run under RAM pressure - only an actual browsing task can show that,
+    and its own error message names OOM specifically when it happens."""
+    try:
+        import browser_use  # noqa: F401
+        import playwright  # noqa: F401
+    except ImportError as e:
+        return {"ok": False, "detail": f"not installed: {e}"}
+    return {
+        "ok": True,
+        "detail": (
+            "playwright and browser-use are installed. This does NOT "
+            "confirm Chromium actually launches or survives this host's "
+            "RAM - on Render's 512MB free tier, headless Chromium (300-"
+            "500MB) competing with the app itself is a real OOM risk. "
+            "Run an actual browsing task to find out; its error message "
+            "will say plainly if it was killed for memory."
+        ),
+    }
+
+
 def _check_optional():
     """Optional integrations - reported as info, never as failures, since
     a deployment that doesn't use them is perfectly healthy."""
@@ -118,6 +144,7 @@ CHECKS = (
     ("search", _check_search),
     ("storage", _check_storage),
     ("tools", _check_tools),
+    ("browser", _check_browser),
 )
 
 
